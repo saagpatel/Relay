@@ -167,12 +167,12 @@ func TestMaxSessionsLimit(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/limit-6"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		// Connection might be rejected immediately
-		if resp != nil && resp.StatusCode == http.StatusServiceUnavailable {
-			return // Expected
+		// Connection was rejected, which is an expected outcome.
+		// We should verify it was for the right reason.
+		if resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("Expected connection to fail with status 503, but got status %d and error: %v", resp.StatusCode, err)
 		}
-		t.Logf("Dial failed (expected): %v", err)
-		return
+		return // Test passed for this path.
 	}
 	defer conn.Close()
 
