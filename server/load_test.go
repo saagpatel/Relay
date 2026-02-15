@@ -13,7 +13,7 @@ import (
 )
 
 // TestConcurrentSessions1000 tests handling of 1000 concurrent client pairs
-func TestConcurrentSessions1000(t *testing.T) {
+func TestConcurrentSessions(t *testing.T) {
 	srv, ts := newTestServer(t, 1000, 10*time.Minute)
 	defer ts.Close()
 
