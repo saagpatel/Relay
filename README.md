@@ -1,15 +1,26 @@
 # Relay
 
-Fast, secure file transfer app for sending files between devices on your network or across the internet.
+Fast, secure, peer-to-peer file transfer. Direct LAN, automatic relay fallback, end-to-end encrypted.
 
 ## Features
 
-- **Direct LAN transfers** — QUIC connections for maximum speed when devices are on the same network
-- **Automatic relay fallback** — WebSocket relay through signaling server when NAT/firewalls block direct connections
-- **End-to-end encryption** — SPAKE2 password-authenticated key exchange + AES-256-GCM encryption
-- **Folder support** — Send entire directories while preserving nested structure
-- **Real-time progress** — Track transfer speed, progress, and connection status
+### Core
+- **Direct LAN transfers** — QUIC connections for blazing-fast local network speeds
+- **Automatic relay fallback** — Works anywhere (home, office, across internet)
+- **Zero-knowledge architecture** — Files never touch cloud; signaling server is encrypted-blind
+- **End-to-end encrypted** — SPAKE2 + AES-256-GCM, verified SHA-256 checksums
+- **Multi-file transfers** — Send entire folders with nested structure preserved
+
+### UX
+- **Real-time progress** — Live speed graph, ETA, per-file status
+- **Drag & drop** — Drop files into app or use traditional file picker
+- **Keyboard shortcuts** — Power-user workflow (Cmd+O, Cmd+V, Escape, Cmd+,)
+- **Dark/Light theme** — System preference detection + manual toggle
 - **Zero configuration** — No port forwarding or network setup required
+
+### Platform
+- **Cross-platform** — macOS, Linux (Windows coming soon)
+- **Self-hostable** — Run your own signaling server (Docker, Fly.io, bare metal)
 
 ## How It Works
 
@@ -72,12 +83,55 @@ cd client && pnpm build
 
 ## Status
 
-**Completed:**
-- Phase 1: Direct QUIC transfers on LAN
-- Phase 2: Signaling server integration
-- Phase 3: Relay fallback + folder support
+✅ **Production-ready**
 
-**All tests passing** (12 Go tests, 26 Rust unit tests, 5 Rust integration tests)
+**Completed Phases:**
+- Phase 1: Direct QUIC transfers ✓
+- Phase 2: Signaling + key exchange ✓
+- Phase 3: Relay fallback + folders ✓
+- Phase 4: Polish + distribution ✓
+
+**All 43 tests passing** (26 Rust unit + 5 integration + 12 Go)
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — System design, data flow, module responsibilities
+- [Security Model](docs/SECURITY.md) — Cryptography, threat model, vulnerability disclosure
+- [Self-Hosting Guide](docs/SELF_HOSTING.md) — Deploy your own signaling server
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — Common issues and debugging
+
+## Keyboard Shortcuts
+
+- **Cmd+O / Ctrl+O** — Open file picker
+- **Cmd+V / Ctrl+V** — Paste transfer code from clipboard
+- **Escape** — Cancel transfer or go back
+- **Cmd+, / Ctrl+,** — Toggle settings
+
+## Deployment
+
+### Self-Hosting (Docker)
+
+```bash
+docker run -d -p 8080:8080 \
+  -e RELAY_MAX_SESSIONS=5000 \
+  ghcr.io/your-org/relay-server:latest
+```
+
+See [Self-Hosting Guide](docs/SELF_HOSTING.md) for full details.
+
+### CI/CD
+
+GitHub Actions automatically:
+- Runs tests on every push
+- Builds platform-specific releases (macOS, Linux)
+- Publishes Docker images on release tags
+
+## Contributing
+
+Contributions welcome! Please:
+1. Search [existing issues](https://github.com/your-org/relay/issues)
+2. Open a PR with tests
+3. Follow existing code style
 
 ## License
 

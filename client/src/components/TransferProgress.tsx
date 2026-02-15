@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 import { transfer, resetTransfer } from "../stores/transfer";
 import { cancelTransfer } from "../lib/tauri-bridge";
 import { formatBytes, formatSpeed, formatETA } from "../lib/format";
+import SpeedGraph from "./SpeedGraph";
 
 export default function TransferProgress() {
   async function handleCancel() {
@@ -51,6 +52,11 @@ export default function TransferProgress() {
           </p>
         </div>
       </div>
+
+      {/* Speed graph */}
+      <Show when={transfer.progress.speedHistory.length > 0}>
+        <SpeedGraph speedHistory={transfer.progress.speedHistory} />
+      </Show>
 
       {/* Current file */}
       <Show when={transfer.progress.currentFile}>

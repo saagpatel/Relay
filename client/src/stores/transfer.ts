@@ -1,6 +1,11 @@
 import { createStore } from "solid-js/store";
 import type { FileOfferInfo } from "../lib/tauri-bridge";
 
+export interface SpeedDataPoint {
+  timestamp: number;
+  speedBps: number;
+}
+
 export interface TransferProgress {
   bytesTransferred: number;
   bytesTotal: number;
@@ -9,6 +14,7 @@ export interface TransferProgress {
   currentFile: string;
   percent: number;
   completedFiles: string[];
+  speedHistory: SpeedDataPoint[];
 }
 
 export interface TransferSummary {
@@ -51,6 +57,7 @@ const defaultProgress: TransferProgress = {
   currentFile: "",
   percent: 0,
   completedFiles: [],
+  speedHistory: [],
 };
 
 const defaultSummary: TransferSummary = {
@@ -87,5 +94,14 @@ export function resetTransfer() {
     summary: { ...defaultSummary },
     error: "",
     connectionType: "negotiating",
+  });
+}
+
+export function addSpeedDataPoint(speedBps: number) {
+  const now = Date.now();
+  setTransfer("progress", "speedHistory", (prev) => {
+    // Keep only last 30 seconds of data
+    const filtered = prev.filter(p => now - p.timestamp < 30000);
+    return [...filtered, { timestamp: now, speedBps }];
   });
 }
