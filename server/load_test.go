@@ -58,10 +58,7 @@ func TestConcurrentSessions(t *testing.T) {
 		}
 	}
 
-	// Verify all sessions cleaned up
-	if count := srv.SessionCount(); count > 0 {
-		t.Errorf("Expected 0 active sessions, got %d", count)
-	}
+	waitForSessionCount(t, srv, 0, 3*time.Second)
 }
 
 // TestSessionTTLCleanup tests that sessions expire after TTL
@@ -80,18 +77,14 @@ func TestSessionTTLCleanup(t *testing.T) {
 	}
 
 	// Verify session exists
-	if count := srv.SessionCount(); count != 1 {
-		t.Fatalf("Expected 1 active session, got %d", count)
-	}
+	waitForSessionCount(t, srv, 1, 1*time.Second)
 
 	// Wait for TTL to expire
 	time.Sleep(150 * time.Millisecond)
 	srv.cleanupExpired()
 
 	// Session should be cleaned up
-	if count := srv.SessionCount(); count != 0 {
-		t.Errorf("Expected 0 active sessions after TTL, got %d", count)
-	}
+	waitForSessionCount(t, srv, 0, 1*time.Second)
 }
 
 // TestMemoryStability runs relay for extended period with constant churn
@@ -131,9 +124,39 @@ func TestMemoryStability(t *testing.T) {
 
 	wg.Wait()
 
-	// All sessions should be cleaned up
-	if count := srv.SessionCount(); count != 0 {
-		t.Errorf("Expected 0 active sessions after churn, got %d", count)
+	waitForSessionCount(t, srv, 0, 3*time.Second)
+}
+
+// TestSessionCleanupLatency ensures cleanup stays within a practical bound.
+func TestSessionCleanupLatency(t *testing.T) {
+	srv, ts := newTestServer(t, 500, 10*time.Minute)
+	defer ts.Close()
+
+	const numSessions = 50
+	var wg sync.WaitGroup
+
+	for i := 0; i < numSessions; i++ {
+		wg.Add(2)
+		code := fmt.Sprintf("latency-%d", i)
+
+		go func(c string) {
+			defer wg.Done()
+			_ = simulateSender(ts, c)
+		}(code)
+
+		go func(c string) {
+			defer wg.Done()
+			time.Sleep(10 * time.Millisecond)
+			_ = simulateReceiver(ts, c)
+		}(code)
+	}
+
+	wg.Wait()
+
+	elapsed := waitForSessionCount(t, srv, 0, 3*time.Second)
+	const maxCleanupLatency = 2 * time.Second
+	if elapsed > maxCleanupLatency {
+		t.Fatalf("Session cleanup too slow: got %v, want <= %v", elapsed, maxCleanupLatency)
 	}
 }
 
@@ -158,10 +181,7 @@ func TestMaxSessionsLimit(t *testing.T) {
 		}
 	}()
 
-	// Verify we have 5 sessions
-	if count := srv.SessionCount(); count != 5 {
-		t.Fatalf("Expected 5 active sessions, got %d", count)
-	}
+	waitForSessionCount(t, srv, 5, 1*time.Second)
 
 	// Try to create 6th session (should fail)
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/limit-6"
@@ -206,6 +226,8 @@ func simulateSender(ts *httptest.Server, code string) error {
 
 	// Wait briefly
 	time.Sleep(20 * time.Millisecond)
+	// Graceful disconnect helps deterministic session cleanup under race mode.
+	_ = conn.WriteJSON(SignalMessage{Type: "disconnect"})
 
 	return nil
 }
@@ -226,6 +248,24 @@ func simulateReceiver(ts *httptest.Server, code string) error {
 
 	// Wait briefly
 	time.Sleep(20 * time.Millisecond)
+	// Graceful disconnect helps deterministic session cleanup under race mode.
+	_ = conn.WriteJSON(SignalMessage{Type: "disconnect"})
 
 	return nil
+}
+
+func waitForSessionCount(t *testing.T, srv *Server, want int, timeout time.Duration) time.Duration {
+	t.Helper()
+	start := time.Now()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if got := srv.SessionCount(); got == want {
+			return time.Since(start)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	got := srv.SessionCount()
+	t.Fatalf("Expected %d active sessions, got %d", want, got)
+	return time.Since(start)
 }
