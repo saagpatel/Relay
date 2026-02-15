@@ -140,3 +140,42 @@
   5. hand off with citations.
 - Verification status: YELLOW
 - Known risks/blockers: local env missing glib for tauri tests.
+
+---
+
+## CHECKPOINT #5 — Phase 4 Baseline Established
+- Timestamp: 2026-02-12
+- Branch/Commit: `claude/analyze-repo-overview-1khYP` (current)
+- Completed since last checkpoint:
+  - Phase 4 definitive implementation plan created (14 steps across 6 phases)
+  - Baseline verification executed and documented
+  - Environment versions captured (Go 1.24.7, Node 22.22.0, Rust 1.93.0)
+  - All 12 Go tests passing with race detector
+  - Frontend build clean (Vite 6.4.1, 26 modules)
+- Next (ordered):
+  - Step 2: Add explicit `negotiating` transport state to frontend
+  - Step 3: Narrow TypeScript bridge types
+  - Step 4-14: Complete all Phase 4 features, CI/CD, tests, docs
+- Verification status: **GREEN** for implemented code
+  - PASS: 12 Go server tests with -race
+  - PASS: Frontend TypeScript build
+  - YELLOW: Cargo tests (environment constraint, documented)
+- Risks/notes:
+  - All phases are independent; can be executed sequentially
+  - No breaking changes to existing API contracts
+
+### REHYDRATION SUMMARY
+- Current repo status: 1 uncommitted file (codex/VERIFICATION.md)
+- What was completed:
+  - Complete Phase 4 implementation plan with all steps defined
+  - Baseline verification for Phase 4 work
+- What is in progress:
+  - Step 2: Frontend state refinement (negotiating transport)
+- Next 5 actions:
+  1. Modify `client/src/stores/transfer.ts` (add negotiating state)
+  2. Modify `client/src/components/ConnectionStatus.tsx` (render negotiating)
+  3. Modify `client/src/App.tsx` (set negotiating on state change)
+  4. Run `pnpm build` to verify
+  5. Proceed to Step 3 (type narrowing)
+- Verification status: GREEN for implemented code
+- Known risks/blockers: None for current implementation scope
