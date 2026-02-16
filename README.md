@@ -46,7 +46,7 @@ Fast, secure, peer-to-peer file transfer. Direct LAN, automatic relay fallback, 
 - Node.js/pnpm
 - macOS/Linux (Windows support TBD)
 
-### Running the signaling server
+### Normal dev mode: run the signaling server
 ```bash
 cd server
 go build -o relay-server .
@@ -59,11 +59,40 @@ Server flags:
 - `--session-ttl` — session expiration (default: 1h)
 - `--relay-rate-limit` — relay bandwidth limit in bytes/sec (default: 10 MB/s)
 
-### Running the client
+### Normal dev mode: run the client
 ```bash
 cd client
 pnpm install
 pnpm tauri dev
+```
+
+### Lean dev mode (low disk)
+Use this when you want to keep local disk usage low while still running the app with the normal dev command flow.
+
+```bash
+./scripts/dev-lean.sh
+```
+
+What lean mode does:
+- Starts the server and client using the same documented tools (`go build`, `pnpm tauri dev`).
+- Redirects heavy build caches to a temporary directory for the current run.
+- Cleans heavy build artifacts automatically when you stop the app.
+
+Tradeoff:
+- Lower persistent disk usage.
+- Slightly slower startup than normal dev, because temporary build caches are rebuilt each run.
+
+### Cleanup commands
+Targeted cleanup (heavy build artifacts only, keeps dependencies):
+
+```bash
+./scripts/cleanup-heavy.sh
+```
+
+Full local reproducible cleanup (includes dependency and language build/test caches):
+
+```bash
+./scripts/cleanup-full.sh
 ```
 
 ### Testing
