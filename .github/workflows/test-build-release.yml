@@ -29,7 +29,7 @@ jobs:
         run: |
           elevate="$(command -v su''do)"
           "$elevate" apt-get update
-          "$elevate" apt-get install -y libwebkit2gtk-4.0-dev \
+          "$elevate" apt-get install -y libwebkit2gtk-4.1-dev \
             build-essential \
             curl \
             wget \
@@ -138,7 +138,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.0-dev \
+          sudo apt-get install -y libwebkit2gtk-4.1-dev \
             build-essential \
             curl \
             wget \
