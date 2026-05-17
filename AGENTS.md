@@ -109,3 +109,48 @@ A skill is a set of local instructions to follow that is stored in a `SKILL.md` 
   - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.
   - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.
 - Safety and fallback: If a skill can't be applied cleanly (missing files, unclear instructions), state the issue, pick the next-best approach, and continue.
+
+<!-- portfolio-context:start -->
+# Portfolio Context
+
+## What This Project Is
+
+Relay is a zero-cloud file-transfer app that uses direct QUIC for LAN speed and falls back to an encrypted WebSocket relay when NAT or firewalls block direct connections. Transfers are end-to-end encrypted with SPAKE2 key exchange and AES-256-GCM so the signaling server cannot read file contents.
+
+## Current State
+
+The repo is active desktop/networking product work. Existing local changes are PR-template metadata, so context recovery should stay documentation-only.
+
+## Stack
+
+| Layer | Technology |
+|-------|------------|
+| Desktop shell | Tauri 2 |
+| Frontend | Solid.js + TypeScript + Tailwind CSS 4 |
+| Backend | Rust 2021 |
+| Transport | QUIC (direct) + WebSocket relay (fallback) |
+| Encryption | SPAKE2 key exchange + AES-256-GCM |
+| Signaling server | Go + gorilla/websocket |
+
+## How To Run
+
+```bash
+# Run in development
+pnpm tauri dev
+
+# Build release app
+pnpm tauri build
+```
+
+## Known Risks
+
+- File contents must remain end-to-end encrypted; the signaling server should stay zero-knowledge.
+- QUIC direct transfer and WebSocket relay fallback both need coverage when transport code changes.
+- Preserve folder structure and multi-file behavior during transfer changes.
+- Keep PR-template drift separate from protocol or app behavior.
+
+## Next Recommended Move
+
+Resolve PR-template drift separately, then verify direct QUIC, relay fallback, encryption handshake, progress UI, and folder transfer behavior before shipping changes.
+
+<!-- portfolio-context:end -->
