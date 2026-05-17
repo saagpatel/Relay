@@ -50,6 +50,7 @@ jobs:
       - run: node scripts/perf/compare-metric.mjs .perf-baselines/bundle.json client/.perf-results/bundle.json totalBytes "$PERF_BUNDLE_DELTA_MAX_RATIO"
 
   perf-build:
+    if: github.actor != 'dependabot[bot]'
     needs: perf-guard
     runs-on: ubuntu-latest
     permissions:
