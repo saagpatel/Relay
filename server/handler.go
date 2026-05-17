@@ -192,11 +192,7 @@ func buildPeerInfo(p *Peer) *PeerInfo {
 func (s *Server) forwardLoop(sess *Session, peer *Peer, code string) {
 	defer func() {
 		// Signal that this peer's forwardLoop has exited.
-		select {
-		case <-peer.Done:
-		default:
-			close(peer.Done)
-		}
+		peer.signalDone()
 
 		sess.mu.Lock()
 		relayActive := sess.RelayActive
