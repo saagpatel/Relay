@@ -13,11 +13,29 @@ fi
 executed=0
 failed=0
 
+should_skip_command() {
+  local cmd="$1"
+  if [[ "${RELAY_SKIP_BUILD_TIME_COMPARE:-0}" == "1" ]]; then
+    case "$cmd" in
+      *measure-build-time.mjs*|*".perf-baselines/build-time.json"*)
+        return 0
+        ;;
+    esac
+  fi
+  return 1
+}
+
 while IFS= read -r cmd || [[ -n "$cmd" ]]; do
   [[ -z "${cmd//[[:space:]]/}" ]] && continue
   [[ "$cmd" =~ ^[[:space:]]*# ]] && continue
 
   executed=$((executed + 1))
+  if should_skip_command "$cmd"; then
+    echo ">>> $cmd"
+    echo "skipped: build-time comparison disabled for metadata-only CI"
+    continue
+  fi
+
   echo ">>> $cmd"
   if ! bash -lc "$cmd"; then
     failed=1

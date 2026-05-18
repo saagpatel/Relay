@@ -10,11 +10,26 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      perf_inputs_changed: ${{ steps.changed-files.outputs.perf_inputs_changed }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 20
+      - id: changed-files
+        name: Detect perf-relevant changes
+        run: |
+          base_ref="origin/${GITHUB_BASE_REF:-main}"
+          merge_base="$(git merge-base "$base_ref" HEAD)"
+          changed_files="$(git diff --name-only "$merge_base" HEAD)"
+          if printf '%s\n' "$changed_files" | grep -Eq '^(client/|scripts/perf/|scripts/ci/(export-operational-thresholds|check-perf-profile)\.mjs|\.perf-baselines/)'; then
+            echo "perf_inputs_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "perf_inputs_changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Enforce perf profile inputs when external perf vars are configured
         run: |
           if [[ -z "${PERF_PROFILE}" || -z "${PERF_BASE_URL}" || -z "${PERF_DATABASE_URL}" ]]; then
@@ -50,7 +65,7 @@ jobs:
       - run: node scripts/perf/compare-metric.mjs .perf-baselines/bundle.json client/.perf-results/bundle.json totalBytes "$PERF_BUNDLE_DELTA_MAX_RATIO"
 
   perf-build:
-    if: github.actor != 'dependabot[bot]'
+    if: github.actor != 'dependabot[bot]' && needs.perf-guard.outputs.perf_inputs_changed == 'true'
     needs: perf-guard
     runs-on: ubuntu-latest
     permissions:
