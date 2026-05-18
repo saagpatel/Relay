@@ -22,7 +22,9 @@ jobs:
       - id: changed-files
         name: Detect perf-relevant changes
         run: |
-          changed_files="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD)"
+          base_ref="origin/${GITHUB_BASE_REF:-main}"
+          merge_base="$(git merge-base "$base_ref" HEAD)"
+          changed_files="$(git diff --name-only "$merge_base" HEAD)"
           if printf '%s\n' "$changed_files" | grep -Eq '^(client/|scripts/perf/|scripts/ci/(export-operational-thresholds|check-perf-profile)\.mjs|\.perf-baselines/)'; then
             echo "perf_inputs_changed=true" >> "$GITHUB_OUTPUT"
           else
