@@ -18,6 +18,7 @@ ignore = [
   "RUSTSEC-2025-0081",
   "RUSTSEC-2025-0098",
   "RUSTSEC-2025-0100",
+  "RUSTSEC-2026-0097",
 ]
 
 # These advisories currently originate from GTK3/Tauri transitive dependencies
