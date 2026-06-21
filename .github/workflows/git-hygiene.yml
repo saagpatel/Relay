@@ -3,7 +3,7 @@ name: git-hygiene
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
-    branches: [master, main]
+    branches: [main, master]
 
 jobs:
   commitlint:
