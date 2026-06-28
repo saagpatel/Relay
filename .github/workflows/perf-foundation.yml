@@ -8,4 +8,4 @@ on:
 
 jobs:
   perf-foundation:
-    uses: saagpatel/sovereign/.github/workflows/perf-foundation.yml@fdd225434bc1185911e53f8df1834ac058949580
+    uses: saagpatel/sovereign/.github/workflows/perf-foundation.yml@331b472c4ccebba09cf3f169e5fc6dca900ea571
