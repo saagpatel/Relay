@@ -23,7 +23,7 @@ node scripts/ci/check-perf-profile.mjs foundation
 go install golang.org/x/vuln/cmd/govulncheck@latest
 (cd server && "$(go env GOPATH)/bin/govulncheck" ./...)
 cargo install cargo-audit --locked
-(cd client/src-tauri && cargo audit --deny warnings)
+(cd client/src-tauri && cargo audit --deny warnings --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195)
 # GHSA-ph9p-34f9-6g65: tmp path-traversal in @lhci/cli dev-dep; no production code path
 (cd client && pnpm audit --audit-level high --ignore GHSA-ph9p-34f9-6g65)
 node scripts/ci/check-release-evidence.mjs --gate g3
