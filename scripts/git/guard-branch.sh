@@ -32,6 +32,13 @@ if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   exit 1
 fi
 
+if [[ "$branch" == dependabot/* ]]; then
+  if [[ "${CI:-}" == "true" || -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "Running on Dependabot branch in CI context: $branch"
+    exit 0
+  fi
+fi
+
 if ! [[ "$branch" =~ $pattern ]]; then
   echo "Invalid branch: $branch"
   echo "Expected: <type>/<slug> or codex/<type>/<slug>"
