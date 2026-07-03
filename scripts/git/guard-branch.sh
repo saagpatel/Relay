@@ -3,7 +3,7 @@ set -euo pipefail
 
 # codex-os-managed
 branch="$(git rev-parse --abbrev-ref HEAD)"
-pattern='^codex/(feat|fix|chore|refactor|docs|test|perf|ci|spike|hotfix)/[a-z0-9]+(-[a-z0-9]+)*$'
+pattern='^(codex/)?(feat|fix|chore|refactor|docs|test|perf|ci|spike|hotfix)/[a-z0-9]+(-[a-z0-9]+)*$'
 
 if [[ "${CI:-}" == "true" || -n "${GITHUB_ACTIONS:-}" ]]; then
   if [[ -n "${GITHUB_HEAD_REF:-}" ]]; then
@@ -19,7 +19,7 @@ if [[ "$branch" == "HEAD" ]]; then
     exit 0
   fi
   echo "Detached HEAD is not allowed for local development."
-  echo "Checkout a codex/<type>/<slug> branch."
+  echo "Checkout a <type>/<slug> or codex/<type>/<slug> branch."
   exit 1
 fi
 
@@ -32,8 +32,15 @@ if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   exit 1
 fi
 
+if [[ "$branch" == dependabot/* ]]; then
+  if [[ "${CI:-}" == "true" || -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "Running on Dependabot branch in CI context: $branch"
+    exit 0
+  fi
+fi
+
 if ! [[ "$branch" =~ $pattern ]]; then
   echo "Invalid branch: $branch"
-  echo "Expected: codex/<type>/<slug>"
+  echo "Expected: <type>/<slug> or codex/<type>/<slug>"
   exit 1
 fi
