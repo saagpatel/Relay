@@ -23,11 +23,13 @@ type Session struct {
 
 // Peer represents one side of a signaling session.
 type Peer struct {
-	Conn    *websocket.Conn
-	Role    string
-	Info    *PeerInfo // from register message (local_ip, local_port)
-	Done    chan struct{}
-	writeMu sync.Mutex
+	Conn      *websocket.Conn
+	Role      string
+	Info      *PeerInfo // from register message (local_ip, local_port)
+	Done      chan struct{}
+	writeMu   sync.Mutex
+	closeOnce sync.Once
+	doneOnce  sync.Once
 }
 
 // WriteJSON sends a JSON message to the peer, safe for concurrent use.
@@ -67,19 +69,22 @@ func (s *Session) Close() {
 
 // Close gracefully closes the peer's WebSocket connection.
 func (p *Peer) Close() {
-	if p.Conn != nil {
-		p.writeMu.Lock()
-		p.Conn.WriteMessage(
-			websocket.CloseMessage,
-			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-		)
-		p.writeMu.Unlock()
-		p.Conn.Close()
-	}
-	select {
-	case <-p.Done:
-		// already closed
-	default:
+	p.closeOnce.Do(func() {
+		if p.Conn != nil {
+			p.writeMu.Lock()
+			p.Conn.WriteMessage(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+			)
+			p.writeMu.Unlock()
+			p.Conn.Close()
+		}
+	})
+	p.signalDone()
+}
+
+func (p *Peer) signalDone() {
+	p.doneOnce.Do(func() {
 		close(p.Done)
-	}
+	})
 }
