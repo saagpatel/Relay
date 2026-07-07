@@ -15,7 +15,7 @@ jobs:
         with:
           go-version: "1.25.11"
       - uses: dtolnay/rust-toolchain@stable
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
       - uses: actions/setup-node@v6
