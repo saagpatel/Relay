@@ -22,7 +22,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -76,7 +76,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'pnpm'
@@ -92,7 +92,7 @@ jobs:
     if: github.event_name == 'release'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Validate release evidence (enforced mode)
@@ -172,7 +172,7 @@ jobs:
         with:
           version: 10
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: 'pnpm'
