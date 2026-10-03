@@ -4,7 +4,7 @@
 
 > Zero-config, zero-cloud file transfer that just works — blazing-fast on your LAN, still works anywhere else.
 
-Relay sends files peer-to-peer using QUIC for direct local-network speed and falls back automatically to an encrypted WebSocket relay when NAT or firewalls block a direct connection. Files are end-to-end encrypted with SPAKE2 key exchange and AES-256-GCM; the signaling server never sees your data.
+Relay sends files peer-to-peer using QUIC for direct local-network speed and falls back automatically to an encrypted WebSocket relay when NAT or firewalls block a direct connection. File contents are end-to-end encrypted with SPAKE2 key exchange and AES-256-GCM; the signaling server forwards encrypted contents, but file names, sizes, relative paths, and checksums are visible to it in relay mode.
 
 ## Features
 
@@ -18,14 +18,14 @@ Relay sends files peer-to-peer using QUIC for direct local-network speed and fal
 
 ### Prerequisites
 - Rust stable toolchain
-- Node.js 20+ and pnpm
+- Node.js 22.12+ and pnpm 10
 - Tauri CLI v2
 
 ### Installation
 ```bash
 git clone https://github.com/saagpatel/Relay
 cd Relay/client
-pnpm install
+pnpm install --frozen-lockfile
 ```
 
 ### Usage
@@ -61,6 +61,8 @@ pnpm tauri build
 The `server/` directory contains a Go signaling server. Deploy it on Fly.io, Docker, or any bare-metal host:
 
 ```bash
+
+# In a separate terminal, start from the Relay repository root.
 cd server
 go build -o relay-server .
 ./relay-server
@@ -69,3 +71,5 @@ go build -o relay-server .
 ## License
 
 MIT
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#verification) for focused automated checks and [the local smoke checklist](docs/LOCAL_SMOKE.md) for optional desktop validation.

@@ -18,4 +18,6 @@ jobs:
           node-version: 22
 
       - name: Policy checks
-        run: node scripts/ci/require-tests-and-docs.mjs
+        run: |
+          node --test scripts/ci/require-tests-and-docs.test.mjs
+          node scripts/ci/require-tests-and-docs.mjs

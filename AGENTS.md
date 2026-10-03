@@ -23,7 +23,7 @@ Relay is a zero-cloud file-transfer app that uses direct QUIC for LAN speed and 
 
 ## Current State
 
-The repo is active desktop/networking product work. Existing local changes are PR-template metadata, so context recovery should stay documentation-only.
+The repo contains desktop/networking product code. Keep PR-template metadata changes separate from protocol or app behavior.
 
 ## Stack
 
@@ -39,6 +39,9 @@ The repo is active desktop/networking product work. Existing local changes are P
 ## How To Run
 
 ```bash
+# Start from the repository root
+cd client
+
 # Run in development
 pnpm tauri dev
 
@@ -55,6 +58,6 @@ pnpm tauri build
 
 ## Next Recommended Move
 
-Resolve PR-template drift separately, then verify direct QUIC, relay fallback, encryption handshake, progress UI, and folder transfer behavior before shipping changes.
+Verify direct QUIC, relay fallback, encryption handshake, progress UI, and folder transfer behavior before shipping changes.
 
 <!-- portfolio-context:end -->
