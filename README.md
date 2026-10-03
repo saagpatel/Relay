@@ -4,7 +4,7 @@
 
 > Zero-config, zero-cloud file transfer that just works — blazing-fast on your LAN, still works anywhere else.
 
-Relay sends files peer-to-peer using QUIC for direct local-network speed and falls back automatically to an encrypted WebSocket relay when NAT or firewalls block a direct connection. Files are end-to-end encrypted with SPAKE2 key exchange and AES-256-GCM; the signaling server never sees your data.
+Relay sends files peer-to-peer using QUIC for direct local-network speed and falls back automatically to an encrypted WebSocket relay when NAT or firewalls block a direct connection. File contents are end-to-end encrypted with SPAKE2 key exchange and AES-256-GCM; the signaling server forwards encrypted contents, but file names, sizes, relative paths, and checksums are visible to it in relay mode.
 
 ## Features
 
@@ -18,7 +18,7 @@ Relay sends files peer-to-peer using QUIC for direct local-network speed and fal
 
 ### Prerequisites
 - Rust stable toolchain
-- Node.js 22.12+ and pnpm 10 (CI selects Node 22)
+- Node.js 22.12+ and pnpm 10 (Linux x64/glibc requires Node 22.20+ for a locked optional dependency; CI selects Node 22)
 - Tauri CLI v2
 
 ### Installation
