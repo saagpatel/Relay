@@ -10,12 +10,18 @@ Use this checklist before calling a Relay build locally release-ready on macOS.
 
 ## Preflight
 
-1. Start the local signaling server:
+Run each step in a separate terminal starting at the Relay repository root.
+Use disposable source/receive directories and synthetic files; desktop launch
+can persist settings and change the save path. Do not use a running production
+server or real personal files. If port 8080 is occupied, stop and select a
+test-owned port, then update the health URL and client signaling URL together.
+
+1. Start a test-owned, loopback-only signaling server:
 
    ```bash
    cd server
    go build -o relay-server .
-   ./relay-server
+   ./relay-server -addr 127.0.0.1:8080
    ```
 
 2. Verify the server is healthy:
@@ -32,7 +38,8 @@ Use this checklist before calling a Relay build locally release-ready on macOS.
    pnpm tauri dev
    ```
 
-4. If the app fails during startup, retry with Rust backtraces enabled:
+4. Stop the client you launched before retrying with Rust backtraces enabled
+   from a fresh terminal at the repository root:
 
    ```bash
    cd client
@@ -157,3 +164,5 @@ Notes:
 5. Multi-file or folder transfer
 6. Settings-driven save path
 7. Relay fallback
+
+After testing, stop only the server/client processes you started. Record skipped or unavailable flows explicitly; automated fixture results do not establish operator-facing release readiness.
