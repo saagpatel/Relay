@@ -18,7 +18,7 @@ Relay sends files peer-to-peer using QUIC for direct local-network speed and fal
 
 ### Prerequisites
 - Rust stable toolchain
-- Node.js 22.12+ and pnpm 10 (Linux x64/glibc requires Node 22.20+ for a locked optional dependency; CI selects Node 22)
+- Node.js 22.12+ and pnpm 10
 - Tauri CLI v2
 
 ### Installation
