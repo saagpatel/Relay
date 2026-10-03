@@ -20,7 +20,7 @@ node scripts/ci/check-perf-profile.mjs foundation
 (cd client/src-tauri && cargo test --test signaling_e2e -- --test-threads=1)
 
 # G3: Security / supply chain (hard fail)
-go install golang.org/x/vuln/cmd/govulncheck@latest
+go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 (cd server && "$(go env GOPATH)/bin/govulncheck" ./...)
 cargo install cargo-audit --locked
 (cd client/src-tauri && cargo audit --deny warnings --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195)
