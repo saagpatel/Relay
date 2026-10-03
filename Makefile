@@ -7,7 +7,7 @@ check:
 	cargo check --manifest-path client/src-tauri/Cargo.toml
 
 test:
-	cargo test --manifest-path client/src-tauri/Cargo.toml
+	cargo test --manifest-path client/src-tauri/Cargo.toml -- --test-threads=1
 
 lint:
 	cargo clippy --manifest-path client/src-tauri/Cargo.toml -- -D warnings
