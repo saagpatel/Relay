@@ -15,9 +15,13 @@ type Session struct {
 	CreatedAt          time.Time
 	ExpiresAt          time.Time
 	RelayActive        bool
+	peersNotified      bool
 	SenderWantsRelay   bool
 	ReceiverWantsRelay bool
+	senderReserved     bool
+	receiverReserved   bool
 	relayDone          chan struct{} // closed when relay loop finishes
+	relayDoneOnce      sync.Once
 	mu                 sync.Mutex
 }
 
@@ -36,6 +40,7 @@ type Peer struct {
 func (p *Peer) WriteJSON(v interface{}) error {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
+	_ = p.Conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	return p.Conn.WriteJSON(v)
 }
 
@@ -67,11 +72,16 @@ func (s *Session) Close() {
 	}
 }
 
+func (s *Session) signalRelayDone() {
+	s.relayDoneOnce.Do(func() { close(s.relayDone) })
+}
+
 // Close gracefully closes the peer's WebSocket connection.
 func (p *Peer) Close() {
 	p.closeOnce.Do(func() {
 		if p.Conn != nil {
 			p.writeMu.Lock()
+			_ = p.Conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			p.Conn.WriteMessage(
 				websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),

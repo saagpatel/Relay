@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -20,7 +21,15 @@ type SignalMessage struct {
 	ProtocolVersion string          `json:"protocol_version,omitempty"`
 }
 
-const signalingProtocolVersion = "1.1.0"
+const signalingProtocolVersion = "2.0.0"
+
+const (
+	writeTimeout         = 10 * time.Second
+	maxRegistrationBytes = 64 * 1024
+	maxRelayFrameBytes   = 256 * 1024 * 1024
+)
+
+var registrationReadTimeout = 10 * time.Second
 
 // PeerInfo carries network information about a peer.
 type PeerInfo struct {
@@ -50,7 +59,9 @@ func (s *Server) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the register message.
+	// Bound the initial unauthenticated registration message and connection time.
+	conn.SetReadLimit(maxRegistrationBytes)
+	_ = conn.SetReadDeadline(time.Now().Add(registrationReadTimeout))
 	var reg SignalMessage
 	if err := conn.ReadJSON(&reg); err != nil {
 		log.Printf("read register error: %v", err)
@@ -64,13 +75,6 @@ func (s *Server) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := s.GetOrCreateSession(code, reg.Role)
-	if err != nil {
-		sendErrorConn(conn, "CODE_IN_USE", err.Error())
-		conn.Close()
-		return
-	}
-
 	peer := &Peer{
 		Conn: conn,
 		Role: reg.Role,
@@ -78,14 +82,19 @@ func (s *Server) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		Done: make(chan struct{}),
 	}
 
-	// Attach peer to session.
-	sess.mu.Lock()
-	if reg.Role == "sender" {
-		sess.Sender = peer
-	} else {
-		sess.Receiver = peer
+	sess, err := s.RegisterPeer(code, peer)
+	if err != nil {
+		sendErrorConn(conn, "CODE_IN_USE", err.Error())
+		conn.Close()
+		return
 	}
-	bothConnected := sess.BothConnected()
+	_ = conn.SetReadDeadline(time.Time{})
+	conn.SetReadLimit(maxRelayFrameBytes)
+	sess.mu.Lock()
+	bothConnected := sess.BothConnected() && !sess.peersNotified
+	if bothConnected {
+		sess.peersNotified = true
+	}
 	sess.mu.Unlock()
 
 	// If both peers are now connected, notify each.
@@ -119,8 +128,8 @@ func (s *Server) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 		if sender != nil && receiver != nil {
 			// Set larger read limits for binary relay traffic.
-			sender.Conn.SetReadLimit(16 * 1024 * 1024)
-			receiver.Conn.SetReadLimit(16 * 1024 * 1024)
+			sender.Conn.SetReadLimit(maxRelayFrameBytes)
+			receiver.Conn.SetReadLimit(maxRelayFrameBytes)
 
 			relayLoop(sender, receiver, s.relayLimiter)
 
@@ -132,10 +141,10 @@ func (s *Server) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		sess.Sender = nil
 		sess.Receiver = nil
 		sess.mu.Unlock()
-		s.RemoveSession(code)
+		s.RemoveSession(code, sess)
 
 		// Signal that relay is done so the receiver's handler can exit.
-		close(sess.relayDone)
+		sess.signalRelayDone()
 	} else if shouldWait {
 		// The receiver's HTTP handler must stay alive while the relay runs,
 		// otherwise the HTTP server closes the underlying TCP connection.
@@ -226,7 +235,7 @@ func (s *Server) forwardLoop(sess *Session, peer *Peer, code string) {
 		}
 
 		if empty {
-			s.RemoveSession(code)
+			s.RemoveSession(code, sess)
 		}
 	}()
 
@@ -333,6 +342,7 @@ func peerInfoFromConn(conn *websocket.Conn) *PeerInfo {
 }
 
 func sendErrorConn(conn *websocket.Conn, code string, message string) {
+	_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	_ = conn.WriteJSON(SignalMessage{
 		Type:            "error",
 		Code:            code,

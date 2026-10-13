@@ -32,6 +32,17 @@ func TestRateLimiter(t *testing.T) {
 	}
 }
 
+func TestRateLimiterAllowsFrameLargerThanBucket(t *testing.T) {
+	limiter := NewRateLimiter(1)
+	limiter.tokens = 0
+	limiter.refillRate = 1e9
+	start := time.Now()
+	limiter.Wait(10) // exceeds the two-byte bucket
+	if time.Since(start) > time.Second {
+		t.Fatal("large frame did not consume tokens in bounded chunks")
+	}
+}
+
 func TestRelayRequest(t *testing.T) {
 	_, ts := newTestServer(t, 100, 10*time.Minute)
 	defer ts.Close()
@@ -155,6 +166,13 @@ func TestRelayBinaryForwarding(t *testing.T) {
 	}
 	if string(data2) != "hello from receiver via relay" {
 		t.Errorf("data mismatch: got %q", string(data2))
+	}
+
+	// Ending either peer must close the opposite relay direction too.
+	_ = sender.Close()
+	_ = receiver.SetReadDeadline(time.Now().Add(time.Second))
+	if _, _, err := receiver.ReadMessage(); err == nil {
+		t.Fatal("expected receiver direction to stop when sender disconnected")
 	}
 }
 
