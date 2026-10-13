@@ -20,6 +20,9 @@ type RateLimiter struct {
 
 // NewRateLimiter creates a rate limiter with the given bytes-per-second limit.
 func NewRateLimiter(bytesPerSecond int64) *RateLimiter {
+	if bytesPerSecond < 1 {
+		bytesPerSecond = 1
+	}
 	// Bucket holds 2 seconds worth of tokens for burst handling
 	maxTokens := float64(bytesPerSecond) * 2.0
 	return &RateLimiter{
@@ -32,27 +35,36 @@ func NewRateLimiter(bytesPerSecond int64) *RateLimiter {
 
 // Wait blocks until n bytes worth of tokens are available, then consumes them.
 func (r *RateLimiter) Wait(n int) {
+	if n <= 0 {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.refill()
-
-	needed := float64(n)
-	for r.tokens < needed {
-		// Calculate wait time for enough tokens
-		deficit := needed - r.tokens
-		waitDuration := time.Duration(deficit / r.refillRate * float64(time.Second))
-		if waitDuration < time.Millisecond {
-			waitDuration = time.Millisecond
-		}
-
-		r.mu.Unlock()
-		time.Sleep(waitDuration)
-		r.mu.Lock()
+	remaining := float64(n)
+	for remaining > 0 {
 		r.refill()
+		// A single frame can exceed the bucket. Consume it in bucket-sized
+		// portions so it proceeds at the configured rate instead of waiting
+		// forever for an impossible token count.
+		needed := remaining
+		if needed > r.maxTokens {
+			needed = r.maxTokens
+		}
+		for r.tokens < needed {
+			deficit := needed - r.tokens
+			waitDuration := time.Duration(deficit / r.refillRate * float64(time.Second))
+			if waitDuration < time.Millisecond {
+				waitDuration = time.Millisecond
+			}
+			r.mu.Unlock()
+			time.Sleep(waitDuration)
+			r.mu.Lock()
+			r.refill()
+		}
+		r.tokens -= needed
+		remaining -= needed
 	}
-
-	r.tokens -= needed
 }
 
 func (r *RateLimiter) refill() {
@@ -72,20 +84,28 @@ func relayLoop(sender *Peer, receiver *Peer, limiter *RateLimiter) {
 	log.Printf("relay: starting bidirectional relay")
 
 	var wg sync.WaitGroup
+	finished := make(chan struct{}, 2)
 	wg.Add(2)
 
 	// sender → receiver
 	go func() {
 		defer wg.Done()
 		forwardBinary("sender→receiver", sender.Conn, receiver, limiter)
+		finished <- struct{}{}
 	}()
 
 	// receiver → sender
 	go func() {
 		defer wg.Done()
 		forwardBinary("receiver→sender", receiver.Conn, sender, limiter)
+		finished <- struct{}{}
 	}()
 
+	// Either direction ending terminates the whole relay and unblocks the
+	// opposite ReadMessage call.
+	<-finished
+	sender.Close()
+	receiver.Close()
 	wg.Wait()
 	log.Printf("relay: relay loop finished")
 }
@@ -100,6 +120,7 @@ func forwardBinary(label string, src *websocket.Conn, dst *Peer, limiter *RateLi
 			}
 			// Close the other side when one side disconnects
 			dst.writeMu.Lock()
+			_ = dst.Conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			dst.Conn.WriteMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			dst.writeMu.Unlock()
@@ -111,6 +132,7 @@ func forwardBinary(label string, src *websocket.Conn, dst *Peer, limiter *RateLi
 			limiter.Wait(len(data))
 
 			dst.writeMu.Lock()
+			_ = dst.Conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			err = dst.Conn.WriteMessage(websocket.BinaryMessage, data)
 			dst.writeMu.Unlock()
 
@@ -122,6 +144,7 @@ func forwardBinary(label string, src *websocket.Conn, dst *Peer, limiter *RateLi
 			}
 		} else if messageType == websocket.CloseMessage {
 			dst.writeMu.Lock()
+			_ = dst.Conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			dst.Conn.WriteMessage(websocket.CloseMessage, data)
 			dst.writeMu.Unlock()
 			return

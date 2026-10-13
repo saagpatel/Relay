@@ -76,7 +76,7 @@ impl ProgressTracker {
         if self.bytes_total == 0 {
             return 100.0;
         }
-        (self.bytes_transferred as f64 / self.bytes_total as f64 * 100.0) as f32
+        ((self.bytes_transferred as f64 / self.bytes_total as f64 * 100.0) as f32).min(100.0)
     }
 
     pub fn bytes_transferred(&self) -> u64 {
@@ -105,9 +105,11 @@ impl ProgressTracker {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ProgressEvent {
     StateChanged {
+        session_id: String,
         state: String,
     },
     TransferProgress {
+        session_id: String,
         bytes_transferred: u64,
         bytes_total: u64,
         speed_bps: u64,
@@ -116,15 +118,18 @@ pub enum ProgressEvent {
         percent: f32,
     },
     FileCompleted {
+        session_id: String,
         name: String,
     },
     TransferComplete {
+        session_id: String,
         duration_seconds: u32,
         average_speed: u64,
         total_bytes: u64,
         file_count: u32,
     },
     Error {
+        session_id: String,
         message: String,
     },
     FileOffer {
@@ -132,6 +137,7 @@ pub enum ProgressEvent {
         files: Vec<FileOfferInfo>,
     },
     ConnectionTypeChanged {
+        session_id: String,
         connection_type: String,
     },
 }
@@ -162,6 +168,13 @@ mod tests {
         tracker.update(500);
         assert_eq!(tracker.bytes_transferred(), 500);
         assert!((tracker.percent() - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn progress_is_capped_at_one_hundred_percent() {
+        let mut tracker = ProgressTracker::new(100);
+        tracker.update(125);
+        assert_eq!(tracker.percent(), 100.0);
     }
 
     #[test]

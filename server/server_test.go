@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,6 +31,105 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 	if resp.ActiveSessions != 0 {
 		t.Errorf("expected 0 active sessions, got %d", resp.ActiveSessions)
+	}
+}
+
+func TestRegisterPeerReservesRoleAtomically(t *testing.T) {
+	srv := NewServer(10, time.Minute, 1000)
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			peer := &Peer{Role: "sender", Done: make(chan struct{})}
+			_, err := srv.RegisterPeer("same-role", peer)
+			results <- err
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if (first == nil) == (second == nil) {
+		t.Fatalf("expected exactly one role reservation to succeed, got %v and %v", first, second)
+	}
+}
+
+func TestRemoveSessionChecksIdentity(t *testing.T) {
+	srv := NewServer(10, time.Minute, 1000)
+	old, err := srv.GetOrCreateSession("reused", "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.mu.Lock()
+	newSession := &Session{Code: "reused"}
+	srv.sessions["reused"] = newSession
+	srv.mu.Unlock()
+	if srv.RemoveSession("reused", old) {
+		t.Fatal("old session removed a replacement session")
+	}
+	if srv.SessionCount() != 1 {
+		t.Fatalf("replacement session missing, count=%d", srv.SessionCount())
+	}
+}
+
+func TestCleanupLoopStopsWithContext(t *testing.T) {
+	srv := NewServer(10, time.Minute, 1000)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		srv.CleanupLoopContext(ctx, time.Hour)
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cleanup loop did not stop after cancellation")
+	}
+}
+
+func TestCloseAllSessionsReleasesConnectionsAndHandlers(t *testing.T) {
+	srv := NewServer(10, time.Minute, 1000)
+	sess, err := srv.GetOrCreateSession("shutdown", "sender")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.relayDone = make(chan struct{})
+	srv.CloseAllSessions()
+	if srv.SessionCount() != 0 {
+		t.Fatalf("sessions remain after shutdown: %d", srv.SessionCount())
+	}
+	select {
+	case <-sess.relayDone:
+	default:
+		t.Fatal("shutdown did not release relay waiters")
+	}
+}
+
+func TestGracefulHTTPServerShutdown(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+
+	response, err := http.Get("http://" + listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status before shutdown: %d", response.StatusCode)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		t.Fatalf("graceful shutdown failed: %v", err)
+	}
+	if err := <-serveDone; !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve returned %v, want http.ErrServerClosed", err)
 	}
 }
 

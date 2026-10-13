@@ -66,7 +66,7 @@ impl QuicEndpoint {
         })
     }
 
-    /// Accept one incoming connection. Accepts any peer (Phase 1: LAN, no fingerprint check).
+    /// Accept one incoming connection. Peer certificates are not verified.
     pub async fn accept_any(&self) -> AppResult<Connection> {
         let incoming = self
             .endpoint

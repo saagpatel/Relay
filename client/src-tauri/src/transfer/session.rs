@@ -30,10 +30,6 @@ impl TransferSession {
         *self.state.write().await = state;
     }
 
-    pub async fn get_state(&self) -> TransferState {
-        self.state.read().await.clone()
-    }
-
     pub fn cancel(&self) {
         self.cancel_token.cancel();
     }

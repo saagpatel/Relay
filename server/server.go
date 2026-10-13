@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -62,11 +63,51 @@ func (s *Server) GetOrCreateSession(code string, role string) (*Session, error) 
 	return sess, nil
 }
 
-// RemoveSession deletes a session by code.
-func (s *Server) RemoveSession(code string) {
+// RegisterPeer atomically reserves a role and attaches its peer to a session.
+func (s *Server) RegisterPeer(code string, peer *Peer) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	sess := s.sessions[code]
+	if sess == nil {
+		if len(s.sessions) >= s.maxSessions {
+			return nil, fmt.Errorf("max sessions reached (%d)", s.maxSessions)
+		}
+		now := time.Now()
+		sess = &Session{Code: code, CreatedAt: now, ExpiresAt: now.Add(s.sessionTTL), relayDone: make(chan struct{})}
+		s.sessions[code] = sess
+	}
+
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	switch peer.Role {
+	case "sender":
+		if sess.Sender != nil || sess.senderReserved {
+			return nil, fmt.Errorf("sender already connected for code %s", code)
+		}
+		sess.senderReserved = true
+		sess.Sender = peer
+	case "receiver":
+		if sess.Receiver != nil || sess.receiverReserved {
+			return nil, fmt.Errorf("receiver already connected for code %s", code)
+		}
+		sess.receiverReserved = true
+		sess.Receiver = peer
+	default:
+		return nil, fmt.Errorf("invalid role %q", peer.Role)
+	}
+	return sess, nil
+}
+
+// RemoveSession deletes a session only if it is still the mapped identity.
+func (s *Server) RemoveSession(code string, expected *Session) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sessions[code] != expected {
+		return false
+	}
 	delete(s.sessions, code)
+	return true
 }
 
 // SessionCount returns the number of active sessions.
@@ -76,13 +117,42 @@ func (s *Server) SessionCount() int {
 	return len(s.sessions)
 }
 
+// CloseAllSessions closes peer connections and releases handlers during shutdown.
+func (s *Server) CloseAllSessions() {
+	s.mu.RLock()
+	sessions := make([]*Session, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.mu.RUnlock()
+
+	for _, sess := range sessions {
+		sess.Close()
+		sess.signalRelayDone()
+		s.RemoveSession(sess.Code, sess)
+	}
+}
+
 // CleanupLoop periodically removes expired sessions.
 func (s *Server) CleanupLoop(interval time.Duration) {
+	s.CleanupLoopContext(nil, interval)
+}
+
+func (s *Server) CleanupLoopContext(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	var done <-chan struct{}
+	if ctx != nil {
+		done = ctx.Done()
+	}
 
-	for range ticker.C {
-		s.cleanupExpired()
+	for {
+		select {
+		case <-ticker.C:
+			s.cleanupExpired()
+		case <-done:
+			return
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ import { transfer, setTransfer, resetTransfer, addSpeedDataPoint } from "./store
 import { settings, applyTheme } from "./stores/settings";
 import { onTransferProgress, cancelTransfer, type ProgressEvent } from "./lib/tauri-bridge";
 import { open } from "@tauri-apps/plugin-dialog";
+import { phaseForState } from "./lib/phase-transition.mjs";
 import SendView from "./components/SendView";
 import ReceiveView from "./components/ReceiveView";
 import TransferProgress from "./components/TransferProgress";
@@ -163,6 +164,7 @@ export default function App() {
   });
 
   function handleProgressEvent(event: ProgressEvent) {
+    if (!transfer.sessionId || event.session_id !== transfer.sessionId) return;
     switch (event.type) {
       case "transferProgress":
         setTransfer("phase", "transferring");
@@ -207,8 +209,8 @@ export default function App() {
         setTransfer("error", event.message);
         break;
       case "stateChanged":
-        if (event.state === "connecting") {
-          setTransfer("phase", "connecting");
+        setTransfer("phase", phaseForState(transfer.phase, transfer.role, event.state));
+        if (event.state === "connecting" && transfer.role === "receiver") {
           setTransfer("connectionType", "negotiating");
         }
         break;

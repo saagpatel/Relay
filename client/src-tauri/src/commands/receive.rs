@@ -80,20 +80,26 @@ pub async fn start_receive(
 
     let code_clone = code.clone();
     let receive_session_id = session_id.clone();
+    let cleanup_id = session_id.clone();
+    let cleanup_sessions = store.clone();
+    let cleanup_accepts = accept_store.clone();
 
     // Run receive pipeline
     let app_handle2 = app.clone();
     tokio::spawn(async move {
-        let result = run_receive_with_signaling(
-            receive_session_id,
-            save_path,
-            &code_clone,
-            &server_url,
-            progress_tx.clone(),
-            accept_rx,
-            cancel_token,
-        )
-        .await;
+        let _cleanup_guard = crate::commands::transfer::SessionCleanupGuard::new(
+            cleanup_sessions,
+            Some(cleanup_accepts),
+            cleanup_id.clone(),
+        );
+        let cancel_wait = cancel_token.clone();
+        let result = tokio::select! {
+            _ = cancel_wait.cancelled() => Err(crate::error::AppError::Cancelled),
+            result = run_receive_with_signaling(
+                receive_session_id, save_path, &code_clone, &server_url,
+                progress_tx.clone(), accept_rx, cancel_token,
+            ) => result,
+        };
 
         match result {
             Ok(()) => {
@@ -105,6 +111,7 @@ pub async fn start_receive(
                     .emit(
                         "transfer:progress",
                         &ProgressEvent::Error {
+                            session_id: cleanup_id.clone(),
                             message: e.to_string(),
                         },
                     )
@@ -129,6 +136,7 @@ async fn run_receive_with_signaling(
 ) -> Result<(), crate::error::AppError> {
     progress_tx
         .send(ProgressEvent::StateChanged {
+            session_id: session_id.clone(),
             state: "connecting".into(),
         })
         .ok();
@@ -173,6 +181,7 @@ async fn run_receive_with_signaling(
 
                     progress_tx
                         .send(ProgressEvent::ConnectionTypeChanged {
+                            session_id: session_id.clone(),
                             connection_type: "direct".into(),
                         })
                         .ok();
@@ -184,17 +193,17 @@ async fn run_receive_with_signaling(
                 }
                 Ok(Err(e)) => {
                     warn!("receive: QUIC connect failed: {e}, falling back to relay");
-                    activate_relay(signaling, &progress_tx).await?
+                    activate_relay(signaling, &progress_tx, &session_id).await?
                 }
                 Err(_) => {
                     warn!("receive: QUIC connect timed out, falling back to relay");
-                    activate_relay(signaling, &progress_tx).await?
+                    activate_relay(signaling, &progress_tx, &session_id).await?
                 }
             }
         }
         Err(e) => {
             warn!("receive: no usable peer address ({e}), going direct to relay");
-            activate_relay(signaling, &progress_tx).await?
+            activate_relay(signaling, &progress_tx, &session_id).await?
         }
     };
 
@@ -216,18 +225,20 @@ async fn run_receive_with_signaling(
 async fn activate_relay(
     mut signaling: SignalingClient,
     progress_tx: &mpsc::UnboundedSender<ProgressEvent>,
+    session_id: &str,
 ) -> Result<Transport, crate::error::AppError> {
     signaling.request_relay().await?;
 
     progress_tx
         .send(ProgressEvent::ConnectionTypeChanged {
+            session_id: session_id.to_owned(),
             connection_type: "relay".into(),
         })
         .ok();
 
     let ws = signaling.into_ws();
     Ok(Transport::Relayed {
-        ws: RelayStream::new(ws),
+        ws: Box::new(RelayStream::new(ws)),
     })
 }
 
