@@ -13,7 +13,7 @@ struct ParsedVersion {
 }
 
 /// Current wire protocol version used by Relay peers/signaling metadata.
-pub const CURRENT_PROTOCOL_VERSION: &str = "1.1.0";
+pub const CURRENT_PROTOCOL_VERSION: &str = "2.0.0";
 
 /// Human-readable policy marker for docs/telemetry.
 pub const COMPATIBILITY_POLICY: &str = "N-1 minor (same major)";
@@ -65,25 +65,25 @@ mod tests {
 
     #[test]
     fn accepts_same_minor() {
-        assert!(is_peer_protocol_compatible("1.1.0"));
-        assert!(is_peer_protocol_compatible("1.1.9"));
+        assert!(is_peer_protocol_compatible("2.0.0"));
+        assert!(is_peer_protocol_compatible("2.0.9"));
     }
 
     #[test]
     fn accepts_n_minus_one_minor() {
-        assert!(is_peer_protocol_compatible("1.0.0"));
-        assert!(is_peer_protocol_compatible("1.0.99"));
+        assert!(is_peer_protocol_compatible("2.0.0"));
+        assert!(is_peer_protocol_compatible("2.0.99"));
     }
 
     #[test]
     fn rejects_older_than_n_minus_one() {
-        assert!(!is_peer_protocol_compatible("0.9.0"));
+        assert!(!is_peer_protocol_compatible("1.9.0"));
     }
 
     #[test]
     fn rejects_newer_minor_or_major() {
-        assert!(!is_peer_protocol_compatible("1.2.0"));
-        assert!(!is_peer_protocol_compatible("2.0.0"));
+        assert!(!is_peer_protocol_compatible("2.1.0"));
+        assert!(!is_peer_protocol_compatible("3.0.0"));
     }
 
     #[test]

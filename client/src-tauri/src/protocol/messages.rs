@@ -30,34 +30,23 @@ pub enum PeerMessage {
     },
 
     /// Sender → Receiver: file transfer complete, verify checksum.
-    FileComplete {
-        file_index: u16,
-        sha256: [u8; 32],
-    },
+    FileComplete { file_index: u16, sha256: [u8; 32] },
 
     /// Receiver → Sender: checksum verified.
-    FileVerified {
-        file_index: u16,
-    },
+    FileVerified { file_index: u16 },
 
     /// Either → Either: all files transferred successfully.
     TransferComplete,
 
     /// Either → Either: cancel the transfer.
-    Cancel {
-        reason: String,
-    },
-
-    /// Keepalive
-    Ping,
-    Pong,
+    Cancel { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
     pub name: String,
     pub size: u64,
-    /// For folder support (Phase 3): relative path within the folder.
+    /// Relative path within a folder transfer.
     pub relative_path: Option<String>,
 }
 
@@ -118,7 +107,7 @@ mod tests {
     fn test_serialize_deserialize_all_variants() {
         let messages = vec![
             PeerMessage::FileOffer {
-                protocol_version: Some("1.1.0".into()),
+                protocol_version: Some("2.0.0".into()),
                 files: vec![FileInfo {
                     name: "test.txt".into(),
                     size: 1024,
@@ -142,8 +131,6 @@ mod tests {
             PeerMessage::Cancel {
                 reason: "test".into(),
             },
-            PeerMessage::Ping,
-            PeerMessage::Pong,
         ];
 
         for msg in &messages {
