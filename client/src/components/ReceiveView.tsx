@@ -2,6 +2,7 @@ import { createSignal, Show } from "solid-js";
 import { transfer, setTransfer, resetTransfer } from "../stores/transfer";
 import { settings } from "../stores/settings";
 import { startReceive, acceptTransfer } from "../lib/tauri-bridge";
+import { cancelTransfer } from "../lib/tauri-bridge";
 import { formatBytes } from "../lib/format";
 import CodeInput from "./CodeInput";
 import FileList from "./FileList";
@@ -69,7 +70,10 @@ export default function ReceiveView() {
           <p class="text-[#a0a0a0]">Connecting to sender...</p>
           <button
             class="text-sm text-[#a0a0a0] hover:text-white transition-colors"
-            onClick={resetTransfer}
+            onClick={async () => {
+              if (transfer.sessionId) await cancelTransfer(transfer.sessionId).catch(() => undefined);
+              resetTransfer();
+            }}
           >
             Cancel
           </button>
