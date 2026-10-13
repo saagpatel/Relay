@@ -12,6 +12,7 @@
 - Code format incorrect (must be `digit-word-word`, e.g., `42-elephant-zebra`)
 - Code expired (sessions expire after 10 minutes by default)
 - Sender disconnected before receiver entered code
+- The clients are pointed at different signaling servers
 
 **Solutions**:
 ```bash
@@ -302,9 +303,15 @@ wireshark -i any -f "tcp port 8080"
 **Test signaling server manually**:
 ```bash
 # WebSocket client test
-websocat ws://localhost:8080/register
-# Send: {"type":"register","code":"42-test-code","role":"sender"}
+websocat ws://localhost:8080/ws/42-test-code
+# Send: {"type":"register","role":"sender"}
 ```
+
+The WebSocket path carries the transfer code. The default client signaling URL is `ws://localhost:8080`; the server route is `/ws/{code}`.
+
+## Receiver save directory
+
+The receiver uses the selected save directory. If no default directory is configured and none is selected for the transfer, the UI currently falls back to `/tmp/relay-received`. Set the default in Settings or choose a directory for the transfer.
 
 ### File Integrity Check
 
