@@ -1,6 +1,6 @@
 // End-to-end integration test: signaling → SPAKE2 → cert fingerprint → QUIC → file transfer.
 //
-// Requires the Go signaling server binary. If not available, tests are skipped.
+// Requires the Go signaling server binary. Tests fail if it cannot be built or found.
 // Build with: cd server && go build -o relay-server .
 // Or run: RELAY_SERVER_BIN=/path/to/relay-server cargo test --test signaling_e2e
 
@@ -119,13 +119,8 @@ impl Drop for TestServer {
 /// Test: Two clients connect through signaling, exchange SPAKE2 keys, get the same key.
 #[tokio::test]
 async fn test_signaling_spake2_exchange() {
-    let binary = match find_server_binary() {
-        Some(b) => b,
-        None => {
-            eprintln!("SKIP: Go signaling server binary not found");
-            return;
-        }
-    };
+    let binary =
+        find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
     let code = TransferCode::generate().to_code_string();
@@ -221,13 +216,8 @@ async fn test_full_file_transfer() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("relay=debug,quinn=info")
         .try_init();
-    let binary = match find_server_binary() {
-        Some(b) => b,
-        None => {
-            eprintln!("SKIP: Go signaling server binary not found");
-            return;
-        }
-    };
+    let binary =
+        find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
     let code = TransferCode::generate().to_code_string();
@@ -285,6 +275,7 @@ async fn test_full_file_transfer() {
         let cancel = CancellationToken::new();
 
         relay_lib::transfer::sender::run_send(
+            "direct-send".into(),
             vec![send_file_clone],
             file_infos,
             &mut transport,
@@ -361,19 +352,14 @@ async fn test_full_file_transfer() {
     assert_eq!(received_data, test_data);
 }
 
-/// Test: Relay fallback — force relay mode (skip QUIC), transfer file, verify integrity.
+/// Test: Relay transport file transfer with both peers explicitly requesting relay.
 #[tokio::test]
-async fn test_relay_fallback() {
+async fn test_relay_transport_transfer() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("relay=debug,quinn=info")
         .try_init();
-    let binary = match find_server_binary() {
-        Some(b) => b,
-        None => {
-            eprintln!("SKIP: Go signaling server binary not found");
-            return;
-        }
-    };
+    let binary =
+        find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
     let code = TransferCode::generate().to_code_string();
@@ -408,7 +394,7 @@ async fn test_relay_fallback() {
 
         let ws = signaling.into_ws();
         let mut transport = Transport::Relayed {
-            ws: RelayStream::new(ws),
+            ws: Box::new(RelayStream::new(ws)),
         };
 
         let file_meta = tokio::fs::metadata(&send_file_clone).await.unwrap();
@@ -422,6 +408,7 @@ async fn test_relay_fallback() {
         let cancel = CancellationToken::new();
 
         relay_lib::transfer::sender::run_send(
+            "relay-send".into(),
             vec![send_file_clone],
             file_infos,
             &mut transport,
@@ -453,7 +440,7 @@ async fn test_relay_fallback() {
 
         let ws = signaling.into_ws();
         let mut transport = Transport::Relayed {
-            ws: RelayStream::new(ws),
+            ws: Box::new(RelayStream::new(ws)),
         };
 
         let (progress_tx, _) = mpsc::unbounded_channel::<ProgressEvent>();
@@ -466,7 +453,7 @@ async fn test_relay_fallback() {
         });
 
         relay_lib::transfer::receiver::run_receive(
-            "test-relay-fallback".to_string(),
+            "test-relay-transport".to_string(),
             recv_path.clone(),
             &mut transport,
             key,
@@ -499,13 +486,8 @@ async fn test_folder_transfer() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("relay=debug,quinn=info")
         .try_init();
-    let binary = match find_server_binary() {
-        Some(b) => b,
-        None => {
-            eprintln!("SKIP: Go signaling server binary not found");
-            return;
-        }
-    };
+    let binary =
+        find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
     let code = TransferCode::generate().to_code_string();
@@ -584,6 +566,7 @@ async fn test_folder_transfer() {
         let cancel = CancellationToken::new();
 
         relay_lib::transfer::sender::run_send(
+            "folder-send".into(),
             files_s,
             infos_s,
             &mut transport,
