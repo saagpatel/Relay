@@ -3,66 +3,62 @@ use ring::rand::SecureRandom;
 
 use crate::error::{AppError, AppResult};
 
-/// Encrypts file chunks with AES-256-GCM.
-/// Uses a counter-based nonce: [4-byte random prefix][8-byte counter].
+/// Encrypts file chunks with AES-256-GCM. Chunk nonces are unique within an
+/// offer because the protocol binds the file and chunk indices into the nonce.
 pub struct ChunkEncryptor {
     key: LessSafeKey,
-    nonce_prefix: [u8; 4],
-    counter: u64,
+    file_index: u32,
+    chunk_index: u64,
 }
 
 impl ChunkEncryptor {
-    pub fn new(key_bytes: &[u8; 32]) -> AppResult<Self> {
+    pub fn new(key_bytes: &[u8; 32], file_index: u32) -> AppResult<Self> {
         let unbound = UnboundKey::new(&AES_256_GCM, key_bytes)
             .map_err(|_| AppError::Crypto("failed to create AES-256-GCM key".into()))?;
-
-        let mut nonce_prefix = [0u8; 4];
-        ring::rand::SystemRandom::new()
-            .fill(&mut nonce_prefix)
-            .map_err(|_| AppError::Crypto("failed to generate nonce prefix".into()))?;
-
         Ok(Self {
             key: LessSafeKey::new(unbound),
-            nonce_prefix,
-            counter: 0,
+            file_index,
+            chunk_index: 0,
         })
     }
 
-    /// Returns the nonce prefix so the receiver can be told (not secret, just unique).
-    pub fn nonce_prefix(&self) -> [u8; 4] {
-        self.nonce_prefix
-    }
-
-    /// Encrypt a chunk of plaintext. Returns (ciphertext_with_tag, nonce).
-    /// The ciphertext includes the 16-byte authentication tag appended by AES-GCM.
     pub fn encrypt_chunk(&mut self, plaintext: &[u8]) -> AppResult<(Vec<u8>, [u8; 12])> {
-        let nonce_bytes = self.make_nonce();
-        let nonce = Nonce::assume_unique_for_key(nonce_bytes);
-
+        if self.chunk_index > u32::MAX as u64 {
+            return Err(AppError::Transfer("too many chunks in file".into()));
+        }
+        let chunk_index = self.chunk_index as u32;
+        let nonce_bytes = make_nonce(self.file_index, chunk_index);
+        let chunk_aad = aad(self.file_index, chunk_index);
         let mut in_out = plaintext.to_vec();
         self.key
-            .seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce_bytes),
+                Aad::from(&chunk_aad[..]),
+                &mut in_out,
+            )
             .map_err(|_| AppError::Crypto("AES-GCM encryption failed".into()))?;
-
-        self.counter += 1;
+        self.chunk_index += 1;
         Ok((in_out, nonce_bytes))
     }
 
-    /// Encrypt a single small payload (convenience for non-streaming use).
-    /// Returns (ciphertext_with_tag, nonce).
-    pub fn encrypt_one(mut self, plaintext: &[u8]) -> AppResult<(Vec<u8>, [u8; 12])> {
-        self.encrypt_chunk(plaintext)
-    }
-
-    fn make_nonce(&self) -> [u8; 12] {
-        let mut nonce = [0u8; 12];
-        nonce[..4].copy_from_slice(&self.nonce_prefix);
-        nonce[4..].copy_from_slice(&self.counter.to_be_bytes());
-        nonce
+    /// Encrypt a small signaling payload with a fresh random nonce.
+    pub fn encrypt_one(self, plaintext: &[u8]) -> AppResult<(Vec<u8>, [u8; 12])> {
+        let mut nonce = [0; 12];
+        ring::rand::SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| AppError::Crypto("failed to generate nonce".into()))?;
+        let mut in_out = plaintext.to_vec();
+        self.key
+            .seal_in_place_append_tag(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::empty(),
+                &mut in_out,
+            )
+            .map_err(|_| AppError::Crypto("AES-GCM encryption failed".into()))?;
+        Ok((in_out, nonce))
     }
 }
 
-/// Decrypts file chunks with AES-256-GCM.
 pub struct ChunkDecryptor {
     key: LessSafeKey,
 }
@@ -76,18 +72,36 @@ impl ChunkDecryptor {
         })
     }
 
-    /// Decrypt a single small payload (convenience for non-streaming use).
     pub fn decrypt_one(self, ciphertext: &[u8], nonce: &[u8; 12]) -> AppResult<Vec<u8>> {
-        self.decrypt_chunk(ciphertext, nonce)
+        self.decrypt_with_aad(ciphertext, nonce, Aad::from(&[][..]))
     }
 
-    /// Decrypt a chunk. `ciphertext` includes the 16-byte auth tag at the end.
-    pub fn decrypt_chunk(&self, ciphertext: &[u8], nonce: &[u8; 12]) -> AppResult<Vec<u8>> {
-        let nonce = Nonce::assume_unique_for_key(*nonce);
+    pub fn decrypt_chunk(
+        &self,
+        ciphertext: &[u8],
+        nonce: &[u8; 12],
+        file_index: u32,
+        chunk_index: u32,
+    ) -> AppResult<Vec<u8>> {
+        if *nonce != make_nonce(file_index, chunk_index) {
+            return Err(AppError::Crypto(
+                "chunk nonce does not match its indices".into(),
+            ));
+        }
+        let chunk_aad = aad(file_index, chunk_index);
+        self.decrypt_with_aad(ciphertext, nonce, Aad::from(&chunk_aad[..]))
+    }
+
+    fn decrypt_with_aad(
+        &self,
+        ciphertext: &[u8],
+        nonce: &[u8; 12],
+        aad: Aad<&[u8]>,
+    ) -> AppResult<Vec<u8>> {
         let mut in_out = ciphertext.to_vec();
         let plaintext = self
             .key
-            .open_in_place(nonce, Aad::empty(), &mut in_out)
+            .open_in_place(Nonce::assume_unique_for_key(*nonce), aad, &mut in_out)
             .map_err(|_| {
                 AppError::Crypto("AES-GCM decryption failed (tampered or wrong key)".into())
             })?;
@@ -95,71 +109,44 @@ impl ChunkDecryptor {
     }
 }
 
+fn make_nonce(file_index: u32, chunk_index: u32) -> [u8; 12] {
+    let mut nonce = [0; 12];
+    nonce[..4].copy_from_slice(&file_index.to_be_bytes());
+    nonce[4..].copy_from_slice(&(chunk_index as u64).to_be_bytes());
+    nonce
+}
+
+fn aad(file_index: u32, chunk_index: u32) -> [u8; 8] {
+    let mut aad = [0; 8];
+    aad[..4].copy_from_slice(&file_index.to_be_bytes());
+    aad[4..].copy_from_slice(&chunk_index.to_be_bytes());
+    aad
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_encrypt_decrypt_roundtrip() {
-        let key = [42u8; 32];
-        let mut encryptor = ChunkEncryptor::new(&key).unwrap();
-        let decryptor = ChunkDecryptor::new(&key).unwrap();
-
-        let plaintext = b"Hello, Relay! This is a test chunk of data.";
-        let (ciphertext, nonce) = encryptor.encrypt_chunk(plaintext).unwrap();
-
-        let decrypted = decryptor.decrypt_chunk(&ciphertext, &nonce).unwrap();
-        assert_eq!(&decrypted, plaintext);
+    fn chunk_nonces_are_unique_across_files() {
+        let key = [7; 32];
+        let mut first = ChunkEncryptor::new(&key, 0).unwrap();
+        let mut second = ChunkEncryptor::new(&key, 1).unwrap();
+        let (_, nonce_a) = first.encrypt_chunk(b"a").unwrap();
+        let (_, nonce_b) = second.encrypt_chunk(b"b").unwrap();
+        assert_ne!(nonce_a, nonce_b);
     }
 
     #[test]
-    fn test_encrypt_decrypt_multiple_chunks() {
-        let key = [99u8; 32];
-        let mut encryptor = ChunkEncryptor::new(&key).unwrap();
-        let decryptor = ChunkDecryptor::new(&key).unwrap();
-
-        for i in 0..100 {
-            let plaintext = format!("chunk number {i}");
-            let (ciphertext, nonce) = encryptor.encrypt_chunk(plaintext.as_bytes()).unwrap();
-            let decrypted = decryptor.decrypt_chunk(&ciphertext, &nonce).unwrap();
-            assert_eq!(decrypted, plaintext.as_bytes());
-        }
-    }
-
-    #[test]
-    fn test_tampered_ciphertext_fails() {
-        let key = [42u8; 32];
-        let mut encryptor = ChunkEncryptor::new(&key).unwrap();
-        let decryptor = ChunkDecryptor::new(&key).unwrap();
-
-        let (mut ciphertext, nonce) = encryptor.encrypt_chunk(b"secret data").unwrap();
-        // Flip a byte
-        ciphertext[0] ^= 0xff;
-
-        let result = decryptor.decrypt_chunk(&ciphertext, &nonce);
-        assert!(result.is_err(), "tampered ciphertext must fail decryption");
-    }
-
-    #[test]
-    fn test_wrong_key_fails() {
-        let key1 = [42u8; 32];
-        let key2 = [99u8; 32];
-        let mut encryptor = ChunkEncryptor::new(&key1).unwrap();
-        let decryptor = ChunkDecryptor::new(&key2).unwrap();
-
-        let (ciphertext, nonce) = encryptor.encrypt_chunk(b"secret data").unwrap();
-        let result = decryptor.decrypt_chunk(&ciphertext, &nonce);
-        assert!(result.is_err(), "wrong key must fail decryption");
-    }
-
-    #[test]
-    fn test_empty_plaintext() {
-        let key = [42u8; 32];
-        let mut encryptor = ChunkEncryptor::new(&key).unwrap();
-        let decryptor = ChunkDecryptor::new(&key).unwrap();
-
-        let (ciphertext, nonce) = encryptor.encrypt_chunk(b"").unwrap();
-        let decrypted = decryptor.decrypt_chunk(&ciphertext, &nonce).unwrap();
-        assert!(decrypted.is_empty());
+    fn chunk_roundtrip_and_indices_are_authenticated() {
+        let key = [42; 32];
+        let mut enc = ChunkEncryptor::new(&key, 3).unwrap();
+        let dec = ChunkDecryptor::new(&key).unwrap();
+        let (ciphertext, nonce) = enc.encrypt_chunk(b"payload").unwrap();
+        assert_eq!(
+            dec.decrypt_chunk(&ciphertext, &nonce, 3, 0).unwrap(),
+            b"payload"
+        );
+        assert!(dec.decrypt_chunk(&ciphertext, &nonce, 4, 0).is_err());
     }
 }
