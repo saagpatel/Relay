@@ -4,7 +4,9 @@ import { pathToFileURL } from 'node:url';
 export function policyFailures(changed) {
   const isTest = (file) => /^tests\//.test(file) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(file) || /_test\.go$/.test(file);
   const isGoManifest = (file) => /(^|\/)go\.(mod|sum)$/.test(file);
-  const isProdCode = (file) => /^(src|app|server|api|lib)\//.test(file) && !isTest(file) && !isGoManifest(file);
+  const isDockerfile = (file) => /(^|\/)Dockerfile$/.test(file);
+  const isProdCode = (file) =>
+    /^(src|app|server|api|lib)\//.test(file) && !isTest(file) && !isGoManifest(file) && !isDockerfile(file);
   const isDoc = (file) => /^docs\//.test(file) || /^openapi\//.test(file) || file === 'README.md';
 
   if (!changed.some(isProdCode)) return [];
