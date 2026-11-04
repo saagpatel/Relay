@@ -3,6 +3,10 @@ allowBuilds:
 ignoredBuiltDependencies:
   - esbuild
 overrides:
+  # GHSA-g3hv-75wg-m249: drop the legacy rimraf/glob/minimatch chain.
+  '@lhci/cli>chrome-launcher': 1.2.1
+  # Preserve the existing "latest" resolution during this security lockfile refresh.
+  '@paulirish/trace_engine>legacy-javascript': 0.0.1
   ip-address: ^10.1.1
   js-yaml: ^3.15.0
   postcss: ^8.5.16
