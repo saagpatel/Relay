@@ -91,6 +91,44 @@ func TestWebSocketHandshake(t *testing.T) {
 	}
 }
 
+func TestSilentRegistrationTimesOut(t *testing.T) {
+	previous := registrationReadTimeout
+	registrationReadTimeout = 25 * time.Millisecond
+	defer func() { registrationReadTimeout = previous }()
+	_, ts := newTestServer(t, 10, time.Minute)
+	defer ts.Close()
+	conn := dialWS(t, ts, "silent-register")
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	if _, _, err := conn.ReadMessage(); err == nil {
+		t.Fatal("expected server to close a connection with no registration")
+	}
+}
+
+func TestPeerJoinedNotifiedOnceWhenRegistrationsOverlap(t *testing.T) {
+	_, ts := newTestServer(t, 10, time.Minute)
+	defer ts.Close()
+	sender := dialWS(t, ts, "overlapping-register")
+	defer sender.Close()
+	receiver := dialWS(t, ts, "overlapping-register")
+	defer receiver.Close()
+	if err := register(sender, "sender"); err != nil {
+		t.Fatal(err)
+	}
+	if err := register(receiver, "receiver"); err != nil {
+		t.Fatal(err)
+	}
+	for _, peer := range []*websocket.Conn{sender, receiver} {
+		_ = peer.SetReadDeadline(time.Now().Add(time.Second))
+		if msg := readMsg(t, peer); msg.Type != "peer_joined" {
+			t.Fatalf("expected one peer_joined event, got %q", msg.Type)
+		}
+		if _, _, err := peer.ReadMessage(); err == nil {
+			t.Fatal("received duplicate peer_joined event")
+		}
+	}
+}
+
 func TestSPAKE2Forwarding(t *testing.T) {
 	_, ts := newTestServer(t, 100, 10*time.Minute)
 	defer ts.Close()

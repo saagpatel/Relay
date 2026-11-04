@@ -23,23 +23,14 @@ func TestConcurrentSessions(t *testing.T) {
 
 	// Launch concurrent sessions
 	for i := 0; i < numSessions; i++ {
-		wg.Add(2) // sender + receiver
+		wg.Add(1) // sender + receiver pair
 
 		code := fmt.Sprintf("load-%d", i)
 
 		go func(sessionCode string) {
 			defer wg.Done()
-			if err := simulateSender(ts, sessionCode); err != nil {
-				errors <- fmt.Errorf("sender %s: %w", sessionCode, err)
-			}
-		}(code)
-
-		go func(sessionCode string) {
-			defer wg.Done()
-			// Small delay to ensure sender registers first
-			time.Sleep(10 * time.Millisecond)
-			if err := simulateReceiver(ts, sessionCode); err != nil {
-				errors <- fmt.Errorf("receiver %s: %w", sessionCode, err)
+			if err := simulatePair(ts, sessionCode); err != nil {
+				errors <- fmt.Errorf("pair %s: %w", sessionCode, err)
 			}
 		}(code)
 	}
@@ -59,6 +50,47 @@ func TestConcurrentSessions(t *testing.T) {
 	}
 
 	waitForSessionCount(t, srv, 0, 3*time.Second)
+}
+
+func simulatePair(ts *httptest.Server, code string) error {
+	senderURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/" + code
+	sender, _, err := websocket.DefaultDialer.Dial(senderURL, nil)
+	if err != nil {
+		return fmt.Errorf("dial sender: %w", err)
+	}
+	defer sender.Close()
+	if err := register(sender, "sender"); err != nil {
+		return fmt.Errorf("register sender: %w", err)
+	}
+
+	receiverURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/" + code
+	receiver, _, err := websocket.DefaultDialer.Dial(receiverURL, nil)
+	if err != nil {
+		return fmt.Errorf("dial receiver: %w", err)
+	}
+	defer receiver.Close()
+	if err := register(receiver, "receiver"); err != nil {
+		return fmt.Errorf("register receiver: %w", err)
+	}
+	_ = sender.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_ = receiver.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var senderJoined, receiverJoined SignalMessage
+	if err := sender.ReadJSON(&senderJoined); err != nil {
+		return fmt.Errorf("sender readiness: %w", err)
+	}
+	if err := receiver.ReadJSON(&receiverJoined); err != nil {
+		return fmt.Errorf("receiver readiness: %w", err)
+	}
+	if senderJoined.Type != "peer_joined" || receiverJoined.Type != "peer_joined" {
+		return fmt.Errorf("unexpected readiness messages: %q and %q", senderJoined.Type, receiverJoined.Type)
+	}
+	if err := sender.WriteJSON(SignalMessage{Type: "disconnect"}); err != nil {
+		return fmt.Errorf("disconnect sender: %w", err)
+	}
+	if err := receiver.WriteJSON(SignalMessage{Type: "disconnect"}); err != nil {
+		return fmt.Errorf("disconnect receiver: %w", err)
+	}
+	return nil
 }
 
 // TestSessionTTLCleanup tests that sessions expire after TTL

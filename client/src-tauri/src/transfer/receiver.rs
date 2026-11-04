@@ -1,5 +1,6 @@
 // Receiver pipeline — orchestrates the full receive flow.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use tokio::sync::{mpsc, oneshot};
@@ -28,6 +29,7 @@ pub async fn run_receive(
     info!("receiver: waiting for file offer");
     progress_tx
         .send(ProgressEvent::StateChanged {
+            session_id: session_id.clone(),
             state: "transferring".into(),
         })
         .ok();
@@ -39,15 +41,13 @@ pub async fn run_receive(
             protocol_version,
             files,
         } => {
-            if let Some(peer_version) = protocol_version.as_deref() {
-                if !is_peer_protocol_compatible(peer_version) {
-                    return Err(AppError::Transfer(format!(
-                        "incompatible peer protocol version '{peer_version}' (local {CURRENT_PROTOCOL_VERSION}, policy {COMPATIBILITY_POLICY})"
-                    )));
-                }
-            } else {
-                // Legacy peers may not send version metadata yet.
-                warn!("receiver: peer protocol_version missing; proceeding in legacy-compat mode");
+            let peer_version = protocol_version
+                .as_deref()
+                .ok_or_else(|| AppError::Transfer("peer protocol version is required".into()))?;
+            if !is_peer_protocol_compatible(peer_version) {
+                return Err(AppError::Transfer(format!(
+                    "incompatible peer protocol version '{peer_version}' (local {CURRENT_PROTOCOL_VERSION}, policy {COMPATIBILITY_POLICY})"
+                )));
             }
             files
         }
@@ -55,6 +55,7 @@ pub async fn run_receive(
     };
 
     info!("receiver: got offer for {} file(s)", files.len());
+    validate_offer(&files)?;
 
     // Notify frontend about the offer
     let offer_infos: Vec<FileOfferInfo> = files
@@ -67,7 +68,7 @@ pub async fn run_receive(
         .collect();
     progress_tx
         .send(ProgressEvent::FileOffer {
-            session_id,
+            session_id: session_id.clone(),
             files: offer_infos,
         })
         .ok();
@@ -90,6 +91,7 @@ pub async fn run_receive(
         .await?;
     progress_tx
         .send(ProgressEvent::StateChanged {
+            session_id: session_id.clone(),
             state: "transferring".into(),
         })
         .ok();
@@ -97,27 +99,10 @@ pub async fn run_receive(
     let total_bytes: u64 = files.iter().map(|f| f.size).sum();
     let mut tracker = ProgressTracker::new(total_bytes);
 
-    // Create reassemblers for each file
-    let mut reassemblers: Vec<Option<FileReassembler>> = Vec::new();
-    for file_info in &files {
-        // Determine file path: use relative_path for folder transfers, name for flat files
-        let file_path = if let Some(ref rel_path) = file_info.relative_path {
-            let safe_rel = sanitize_path(rel_path)?;
-            let full = save_dir.join(&safe_rel);
-            // Create parent directories for nested files
-            if let Some(parent) = full.parent() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
-            full
-        } else {
-            let safe_name = sanitize_filename(&file_info.name);
-            save_dir.join(&safe_name)
-        };
-
-        let decryptor = ChunkDecryptor::new(&encryption_key)?;
-        let reassembler = FileReassembler::new(&file_path, decryptor).await?;
-        reassemblers.push(Some(reassembler));
-    }
+    let destinations = validate_destinations(&save_dir, &files).await?;
+    let mut reassemblers: Vec<Option<FileReassembler>> = (0..files.len()).map(|_| None).collect();
+    let mut next_chunk = vec![0u32; files.len()];
+    let mut verified = vec![false; files.len()];
 
     // Receive chunks until TransferComplete
     loop {
@@ -127,20 +112,7 @@ pub async fn run_receive(
                 transport.send_peer_message(&PeerMessage::Cancel {
                     reason: "cancelled by receiver".into(),
                 }).await.ok();
-                // Clean up partial files
-                for file_info in &files {
-                    let file_path = if let Some(ref rel_path) = file_info.relative_path {
-                        if let Ok(safe_rel) = sanitize_path(rel_path) {
-                            save_dir.join(&safe_rel)
-                        } else {
-                            continue;
-                        }
-                    } else {
-                        let safe_name = sanitize_filename(&file_info.name);
-                        save_dir.join(&safe_name)
-                    };
-                    tokio::fs::remove_file(&file_path).await.ok();
-                }
+                drop(reassemblers);
                 return Err(AppError::Cancelled);
             },
         };
@@ -148,31 +120,53 @@ pub async fn run_receive(
         match msg {
             PeerMessage::FileChunk {
                 file_index,
+                chunk_index,
                 data,
                 nonce,
                 ..
             } => {
-                let idx = file_index as usize;
-                if idx >= reassemblers.len() {
+                let idx = usize::from(file_index);
+                let expected_chunk = *checked_file_mut(&mut next_chunk, file_index)?;
+                if verified[idx] {
+                    return Err(AppError::Transfer(
+                        "chunk received after file verification".into(),
+                    ));
+                }
+                if chunk_index != expected_chunk {
                     return Err(AppError::Transfer(format!(
-                        "invalid file index: {file_index}"
+                        "invalid chunk index {chunk_index}; expected {expected_chunk}"
                     )));
+                }
+                if data.len() < 16 || data.len() > crate::protocol::chunker::CHUNK_SIZE + 16 {
+                    return Err(AppError::Transfer("invalid encrypted chunk size".into()));
+                }
+                if reassemblers[idx].is_none() {
+                    reassemblers[idx] = Some(
+                        FileReassembler::new(
+                            &destinations[idx],
+                            ChunkDecryptor::new(&encryption_key)?,
+                        )
+                        .await?,
+                    );
                 }
                 let reassembler = reassemblers[idx]
                     .as_mut()
                     .ok_or_else(|| AppError::Transfer("file already completed".into()))?;
-
-                // data.len() before decryption includes the auth tag (16 bytes)
-                let plaintext_size = if data.len() > 16 {
-                    data.len() - 16
-                } else {
-                    data.len()
-                };
-                reassembler.write_chunk(&data, &nonce).await?;
-
+                let plaintext_size = reassembler
+                    .write_chunk(&data, &nonce, u32::from(file_index), chunk_index)
+                    .await?;
+                if reassembler.bytes_written() > files[idx].size {
+                    return Err(AppError::Transfer(
+                        "received more bytes than offered".into(),
+                    ));
+                }
+                next_chunk[idx] = expected_chunk
+                    .checked_add(1)
+                    .ok_or_else(|| AppError::Transfer("chunk index overflow".into()))?;
                 tracker.update(plaintext_size as u64);
                 progress_tx
                     .send(ProgressEvent::TransferProgress {
+                        session_id: session_id.clone(),
                         bytes_transferred: tracker.bytes_transferred(),
                         bytes_total: tracker.bytes_total(),
                         speed_bps: tracker.speed_bps(),
@@ -183,12 +177,25 @@ pub async fn run_receive(
                     .ok();
             }
             PeerMessage::FileComplete { file_index, sha256 } => {
-                let idx = file_index as usize;
-                let reassembler = reassemblers[idx]
+                let idx = usize::from(file_index);
+                let slot = checked_file_mut(&mut reassemblers, file_index)?;
+                if verified[idx] {
+                    return Err(AppError::Transfer("file already completed".into()));
+                }
+                if slot.is_none() {
+                    *slot = Some(
+                        FileReassembler::new(
+                            &destinations[idx],
+                            ChunkDecryptor::new(&encryption_key)?,
+                        )
+                        .await?,
+                    );
+                }
+                let reassembler = slot
                     .take()
                     .ok_or_else(|| AppError::Transfer("file already completed".into()))?;
-
-                reassembler.verify(&sha256)?;
+                reassembler.verify(&sha256, files[idx].size).await?;
+                verified[idx] = true;
                 info!("receiver: file '{}' verified", files[idx].name);
 
                 transport
@@ -197,11 +204,13 @@ pub async fn run_receive(
 
                 progress_tx
                     .send(ProgressEvent::FileCompleted {
+                        session_id: session_id.clone(),
                         name: files[idx].name.clone(),
                     })
                     .ok();
             }
             PeerMessage::TransferComplete => {
+                require_all_verified(&verified)?;
                 info!("receiver: transfer complete");
                 break;
             }
@@ -219,6 +228,7 @@ pub async fn run_receive(
 
     progress_tx
         .send(ProgressEvent::TransferComplete {
+            session_id,
             duration_seconds: tracker.elapsed_seconds(),
             average_speed: tracker.average_speed(),
             total_bytes,
@@ -297,6 +307,87 @@ fn sanitize_filename(name: &str) -> String {
     }
 }
 
+fn validate_offer(files: &[crate::protocol::messages::FileInfo]) -> AppResult<()> {
+    const MAX_FILES: usize = 4096;
+    const MAX_METADATA_BYTES: usize = 1024 * 1024;
+    if files.is_empty() || files.len() > MAX_FILES || files.len() > u16::MAX as usize + 1 {
+        return Err(AppError::Transfer(
+            "invalid or excessive file count in offer".into(),
+        ));
+    }
+    let metadata_bytes: usize = files
+        .iter()
+        .map(|f| f.name.len() + f.relative_path.as_ref().map_or(0, String::len))
+        .sum();
+    if metadata_bytes > MAX_METADATA_BYTES {
+        return Err(AppError::Transfer(
+            "file offer metadata exceeds limit".into(),
+        ));
+    }
+    files
+        .iter()
+        .try_fold(0u64, |total, file| total.checked_add(file.size))
+        .ok_or_else(|| AppError::Transfer("file offer total size overflow".into()))?;
+    Ok(())
+}
+
+async fn validate_destinations(
+    save_dir: &Path,
+    files: &[crate::protocol::messages::FileInfo],
+) -> AppResult<Vec<PathBuf>> {
+    tokio::fs::create_dir_all(save_dir).await?;
+    let root = tokio::fs::canonicalize(save_dir).await?;
+    let mut seen = HashSet::new();
+    let mut destinations = Vec::with_capacity(files.len());
+    for file in files {
+        let rel = match &file.relative_path {
+            Some(path) => sanitize_path(path)?,
+            None => PathBuf::from(sanitize_filename(&file.name)),
+        };
+        let target = root.join(rel);
+        if !seen.insert(target.clone()) {
+            return Err(AppError::Transfer(format!(
+                "duplicate destination: {}",
+                target.display()
+            )));
+        }
+        let parent = target
+            .parent()
+            .ok_or_else(|| AppError::Transfer("destination has no parent".into()))?;
+        tokio::fs::create_dir_all(parent).await?;
+        let canonical_parent = tokio::fs::canonicalize(parent).await?;
+        if !canonical_parent.starts_with(&root) {
+            return Err(AppError::Transfer(
+                "destination escapes save directory through a symlink".into(),
+            ));
+        }
+        if tokio::fs::symlink_metadata(&target).await.is_ok() {
+            return Err(AppError::Transfer(format!(
+                "destination already exists: {}",
+                target.display()
+            )));
+        }
+        destinations.push(target);
+    }
+    Ok(destinations)
+}
+
+fn checked_file_mut<T>(files: &mut [T], index: u16) -> AppResult<&mut T> {
+    files
+        .get_mut(usize::from(index))
+        .ok_or_else(|| AppError::Transfer(format!("invalid file index: {index}")))
+}
+
+fn require_all_verified(verified: &[bool]) -> AppResult<()> {
+    if verified.iter().all(|done| *done) {
+        Ok(())
+    } else {
+        Err(AppError::Transfer(
+            "TransferComplete received before every file was verified".into(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,5 +448,66 @@ mod tests {
         // On Unix, backslash is treated as part of the filename and sanitized
         // On Windows, it's treated as a separator
         assert!(!p.as_os_str().is_empty());
+    }
+
+    fn info(name: &str, relative_path: Option<&str>) -> crate::protocol::messages::FileInfo {
+        crate::protocol::messages::FileInfo {
+            name: name.into(),
+            size: 1,
+            relative_path: relative_path.map(str::to_owned),
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_duplicate_destinations_and_existing_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let duplicate = [info("same.txt", None), info("same.txt", None)];
+        assert!(validate_destinations(dir.path(), &duplicate).await.is_err());
+        let existing = [info("present.txt", None)];
+        tokio::fs::write(dir.path().join("present.txt"), b"preserve")
+            .await
+            .unwrap();
+        assert!(validate_destinations(dir.path(), &existing).await.is_err());
+        assert_eq!(
+            tokio::fs::read(dir.path().join("present.txt"))
+                .await
+                .unwrap(),
+            b"preserve"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_symlink_escape_and_metadata_overflow() {
+        let base = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.path(), base.path().join("escape")).unwrap();
+            assert!(
+                validate_destinations(base.path(), &[info("file", Some("escape/file"))])
+                    .await
+                    .is_err()
+            );
+        }
+        let huge = vec![info(&"x".repeat(1_048_577), None)];
+        assert!(validate_offer(&huge).is_err());
+    }
+
+    #[test]
+    fn offer_file_count_is_bounded() {
+        let files: Vec<_> = (0..4097).map(|i| info(&format!("{i}"), None)).collect();
+        assert!(validate_offer(&files).is_err());
+    }
+
+    #[test]
+    fn checked_file_index_rejects_out_of_range() {
+        let mut files = vec![10u8];
+        assert!(checked_file_mut(&mut files, 1).is_err());
+    }
+
+    #[test]
+    fn rejects_early_transfer_complete() {
+        assert!(require_all_verified(&[true, false]).is_err());
+        assert!(require_all_verified(&[true, true]).is_ok());
     }
 }

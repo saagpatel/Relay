@@ -54,7 +54,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 
 #### Crypto Module
 - `crypto/spake.rs` — SPAKE2 password-authenticated key exchange
-- `crypto/aes_gcm.rs` — AES-256-GCM symmetric encryption with counter-mode nonces
+- `crypto/aes_gcm.rs` — AES-256-GCM symmetric encryption with per-file, per-chunk nonces
 - `crypto/checksum.rs` — SHA-256 file integrity verification
 
 #### Protocol Module
@@ -113,8 +113,8 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 
 3. **Key Exchange** (Both)
    - Exchange SPAKE2 messages via signaling server
-   - Derive 32-byte shared key from transfer code (password)
-   - Exchange QUIC certificate fingerprints
+   - Derive a shared key from the transfer code, which is both the rendezvous ID and password
+   - Exchange QUIC certificate fingerprints as signaling data; peers do not verify the certificates
 
 4. **Connection Negotiation** (Both)
    - **Try Direct**: Receiver connects to sender's QUIC endpoint
@@ -138,9 +138,9 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 ## Security Model
 
 ### Threat Model
-- **Users trust each other**: Transfer code exchange implies mutual consent
-- **Signaling server is untrusted**: Sees IPs and encrypted payloads only (no plaintext data)
-- **No PKI**: SPAKE2 derives shared secret from code (no CA required)
+- **Users trust each other**: Share the transfer code only with the intended peer. It is both the rendezvous identifier and the SPAKE2 password.
+- **Signaling server**: Cannot decrypt file contents, but sees peer IPs and file metadata; relay mode exposes timing and frame sizes.
+- **Peer identity**: QUIC peer certificates are self-signed and not verified. SPAKE2 is not bound to the QUIC certificate fingerprints, so active peer impersonation is not ruled out.
 
 ### Encryption Layers
 
@@ -149,9 +149,9 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
    - Both parties must know the code
 
 2. **Transport Encryption**: AES-256-GCM
-   - Chunk-level encryption with counter-based nonces
-   - 4-byte random prefix + 8-byte counter
-   - Authenticated encryption (detects tampering)
+   - Chunk-level encryption with nonces derived from file and chunk indices
+   - File and chunk indices are authenticated as associated data
+   - Authenticated encryption detects ciphertext tampering
 
 3. **Integrity Verification**: SHA-256
    - Per-file checksum computed during transfer
@@ -160,10 +160,12 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 
 ### Input Validation
 
-- **Path Traversal**: Blocks `..`, absolute paths, null bytes
+- **Path Traversal**: Validates and confines output paths to the selected save directory
 - **Code Validation**: Enforces digit-word-word format
-- **Message Length**: 16 MB max per message
-- **Rate Limiting**: Relay server enforces 10 MB/s per session
+- **Offer Limits**: File count and metadata size are bounded
+- **Message Length**: Rust peer-message decoder rejects messages above 256 MiB
+- **Signaling route**: WebSocket connections use `/ws/{code}`; the default client URL is `ws://localhost:8080`
+- **Destination default**: When no save directory is configured, the UI uses `/tmp/relay-received`
 
 ## Performance Characteristics
 
@@ -176,6 +178,6 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 ## Deployment
 
 - **Client**: Tauri desktop app (macOS, Linux)
-- **Server**: Docker container on Fly.io (global edge)
+- **Server**: Self-hostable Go signaling and relay service
 - **Health**: GET /health endpoint (active session count)
 - **Monitoring**: Tracing logs (info level)

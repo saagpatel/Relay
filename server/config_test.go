@@ -67,3 +67,22 @@ func TestLoadConfigFromEnvRejectsInvalidValues(t *testing.T) {
 		t.Fatalf("expected env name in error, got %v", err)
 	}
 }
+
+func TestLoadConfigFromEnvRejectsNonpositiveValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{"RELAY_MAX_SESSIONS", "0"},
+		{"RELAY_SESSION_TTL", "-1s"},
+		{"RELAY_RATE_LIMIT", "-1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(test.name, test.value)
+			if _, err := loadConfigFromEnv(); err == nil || !strings.Contains(err.Error(), test.name) {
+				t.Fatalf("expected %s validation error, got %v", test.name, err)
+			}
+		})
+	}
+}

@@ -82,11 +82,6 @@ fn wordlist() -> Vec<&'static str> {
         .collect()
 }
 
-/// Get a copy of the wordlist for the frontend.
-pub fn get_wordlist() -> Vec<String> {
-    wordlist().into_iter().map(String::from).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

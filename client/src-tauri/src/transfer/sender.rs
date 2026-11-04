@@ -1,7 +1,4 @@
 // Sender pipeline — orchestrates the full send flow.
-// Phase 1: Direct QUIC on LAN.
-// Phase 2: Via signaling server.
-// Phase 3: With relay fallback + folder support.
 
 use std::path::PathBuf;
 
@@ -21,6 +18,7 @@ use crate::transfer::progress::{ProgressEvent, ProgressTracker};
 /// `files` — absolute paths to each file on disk (one per FileInfo entry).
 /// `file_infos` — metadata including name, size, and optional relative_path for folders.
 pub async fn run_send(
+    session_id: String,
     files: Vec<PathBuf>,
     file_infos: Vec<FileInfo>,
     transport: &mut Transport,
@@ -29,8 +27,22 @@ pub async fn run_send(
     cancel: tokio_util::sync::CancellationToken,
 ) -> AppResult<()> {
     info!("sender: starting transfer ({} files)", files.len());
+    if files.len() > 4096 || files.len() > u16::MAX as usize + 1 || files.len() != file_infos.len()
+    {
+        return Err(AppError::Transfer("invalid file count".into()));
+    }
+    let metadata_bytes: usize = file_infos
+        .iter()
+        .map(|f| f.name.len() + f.relative_path.as_ref().map_or(0, String::len))
+        .sum();
+    if metadata_bytes > 1024 * 1024 {
+        return Err(AppError::Transfer(
+            "file offer metadata exceeds limit".into(),
+        ));
+    }
     progress_tx
         .send(ProgressEvent::StateChanged {
+            session_id: session_id.clone(),
             state: "transferring".into(),
         })
         .ok();
@@ -64,7 +76,9 @@ pub async fn run_send(
 
     // Transfer each file
     for (file_index, path) in files.iter().enumerate() {
-        let encryptor = ChunkEncryptor::new(&encryption_key)?;
+        let wire_index = u16::try_from(file_index)
+            .map_err(|_| AppError::Transfer("too many files in transfer".into()))?;
+        let encryptor = ChunkEncryptor::new(&encryption_key, file_index as u32)?;
         let mut chunker = FileChunker::new(path, encryptor).await?;
         let file_name = &file_infos[file_index].name;
 
@@ -82,10 +96,10 @@ pub async fn run_send(
                 return Err(AppError::Cancelled);
             }
 
-            let chunk_len = data.len() as u64;
+            let chunk_len = data.len().saturating_sub(16) as u64;
             transport
                 .send_peer_message(&PeerMessage::FileChunk {
-                    file_index: file_index as u16,
+                    file_index: wire_index,
                     chunk_index,
                     data,
                     nonce,
@@ -95,12 +109,13 @@ pub async fn run_send(
             tracker.update(chunk_len);
             progress_tx
                 .send(ProgressEvent::TransferProgress {
+                    session_id: session_id.clone(),
                     bytes_transferred: tracker.bytes_transferred(),
                     bytes_total: tracker.bytes_total(),
                     speed_bps: tracker.speed_bps(),
                     eta_seconds: tracker.eta_seconds(),
                     current_file: file_name.clone(),
-                    percent: tracker.percent(),
+                    percent: tracker.percent().min(100.0),
                 })
                 .ok();
         }
@@ -109,7 +124,7 @@ pub async fn run_send(
         let checksum = chunker.finalize();
         transport
             .send_peer_message(&PeerMessage::FileComplete {
-                file_index: file_index as u16,
+                file_index: wire_index,
                 sha256: checksum,
             })
             .await?;
@@ -117,16 +132,26 @@ pub async fn run_send(
         // Wait for verification
         let verify = transport.recv_peer_message().await?;
         match verify {
-            PeerMessage::FileVerified { .. } => {
+            PeerMessage::FileVerified {
+                file_index: ack_index,
+            } if ack_index == wire_index => {
                 info!("sender: file '{file_name}' verified by receiver");
                 progress_tx
                     .send(ProgressEvent::FileCompleted {
+                        session_id: session_id.clone(),
                         name: file_name.clone(),
                     })
                     .ok();
             }
             PeerMessage::Cancel { reason } => {
                 return Err(AppError::Transfer(format!("peer cancelled: {reason}")));
+            }
+            PeerMessage::FileVerified {
+                file_index: ack_index,
+            } => {
+                return Err(AppError::Transfer(format!(
+                    "receiver acknowledged file {ack_index}, expected {wire_index}"
+                )));
             }
             _ => {
                 return Err(AppError::Transfer("expected FileVerified message".into()));
@@ -147,6 +172,7 @@ pub async fn run_send(
 
     progress_tx
         .send(ProgressEvent::TransferComplete {
+            session_id,
             duration_seconds: tracker.elapsed_seconds(),
             average_speed: tracker.average_speed(),
             total_bytes,

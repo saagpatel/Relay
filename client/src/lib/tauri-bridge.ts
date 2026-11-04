@@ -15,6 +15,7 @@ export interface FileOfferInfo {
 
 export interface TransferProgress {
   type: "transferProgress";
+  session_id: string;
   bytes_transferred: number;
   bytes_total: number;
   speed_bps: number;
@@ -25,6 +26,7 @@ export interface TransferProgress {
 
 export interface TransferCompleteEvent {
   type: "transferComplete";
+  session_id: string;
   duration_seconds: number;
   average_speed: number;
   total_bytes: number;
@@ -39,21 +41,25 @@ export interface FileOfferEvent {
 
 export interface FileCompletedEvent {
   type: "fileCompleted";
+  session_id: string;
   name: string;
 }
 
 export interface ErrorEvent {
   type: "error";
+  session_id: string;
   message: string;
 }
 
 export interface StateChangedEvent {
   type: "stateChanged";
+  session_id: string;
   state: string;
 }
 
 export interface ConnectionTypeChangedEvent {
   type: "connectionTypeChanged";
+  session_id: string;
   connection_type: "direct" | "relay";
 }
 

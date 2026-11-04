@@ -1,63 +1,43 @@
-# AGENTS.md
+# Repository Guide
 
-<!-- comm-contract:start -->
+## Purpose
 
-## Communication Contract
+Relay is a desktop peer-to-peer file transfer app. It uses QUIC for direct transfers and a Go WebSocket service for signaling and encrypted relay. Keep file contents end-to-end encrypted and treat signaling data and file metadata as visible to the service.
 
-- Inherit global Codex communication and reporting rules from `~/.codex/AGENTS.override.md` and `~/.codex/policies/communication/BigPictureReportingV1.md`.
-- Repo-specific instructions below add project constraints only; do not restate global voice or status-reporting rules here.
-<!-- comm-contract:end -->
+## Layout
 
-## Inherited Operating Rules
+- `client/src/`: Solid.js user interface
+- `client/src-tauri/`: Tauri shell and Rust transfer, protocol, crypto, and networking code
+- `server/`: Go signaling and relay service
+- `docs/`: architecture, security, self-hosting, troubleshooting, and local smoke guidance
+- `.github/workflows/`: CI and release workflows
 
-- Inherit global git, review/fix, testing, docs, skill-use, and reporting gates from `~/.codex/AGENTS.md` and active session instructions.
-- Use `.codex/verify.commands` and `.codex/scripts/run_verify_commands.sh` as this repo's local verification authority when present.
-- Keep the project-specific portfolio constraints below as the source of truth for runtime, privacy, and release risks.
+## Setup
 
-<!-- portfolio-context:start -->
-# Portfolio Context
+- Use the Node.js, pnpm, Rust, and Go versions pinned in the repository.
+- Install client dependencies with `pnpm --dir client install --frozen-lockfile`.
+- Verify Go modules with `cd server && go mod verify`.
+- Install the platform prerequisites documented by Tauri before building or running the desktop app.
 
-## What This Project Is
+## Checks
 
-Relay is a zero-cloud file-transfer app that uses direct QUIC for LAN speed and falls back to an encrypted WebSocket relay when NAT or firewalls block direct connections. Transfers are end-to-end encrypted with SPAKE2 key exchange and AES-256-GCM so the signaling server cannot read file contents.
+- Run `make check` from the repository root for the aggregate local checks.
+- For desktop integration, use `cd client && pnpm tauri dev` with a local signaling server (`cd server && go run .`).
+- Use `docs/LOCAL_SMOKE.md` for optional macOS desktop validation.
+- Report each command's actual result. A local check does not establish hosted CI, deployment, or user acceptance.
 
-## Current State
+## Boundaries
 
-The repo contains desktop/networking product code. Keep PR-template metadata changes separate from protocol or app behavior.
+- Preserve end-to-end file encryption, folder structure, and multi-file transfer behavior.
+- Do not claim that QUIC peer certificates are verified: clients currently accept unverified self-signed certificates.
+- The transfer code is both the rendezvous identifier and SPAKE2 password; do not describe it as an independently authenticated identity.
+- The default client signaling URL is `ws://localhost:8080`; do not imply a hosted default exists.
+- Keep receiver writes inside the chosen destination and preserve existing files on failed or cancelled transfers.
+- Keep changes scoped to the requested behavior and preserve unrelated work.
 
-## Stack
+## Delivery
 
-| Layer | Technology |
-|-------|------------|
-| Desktop shell | Tauri 2 |
-| Frontend | Solid.js + TypeScript + Tailwind CSS 4 |
-| Backend | Rust 2021 |
-| Transport | QUIC (direct) + WebSocket relay (fallback) |
-| Encryption | SPAKE2 key exchange + AES-256-GCM |
-| Signaling server | Go + gorilla/websocket |
-
-## How To Run
-
-```bash
-# Start from the repository root
-cd client
-
-# Run in development
-pnpm tauri dev
-
-# Build release app
-pnpm tauri build
-```
-
-## Known Risks
-
-- File contents must remain end-to-end encrypted; the signaling server should stay zero-knowledge.
-- QUIC direct transfer and WebSocket relay fallback both need coverage when transport code changes.
-- Preserve folder structure and multi-file behavior during transfer changes.
-- Keep PR-template drift separate from protocol or app behavior.
-
-## Next Recommended Move
-
-Verify direct QUIC, relay fallback, encryption handshake, progress UI, and folder transfer behavior before shipping changes.
-
-<!-- portfolio-context:end -->
+- Read the relevant code and tests before changing protocol, receiver, or server behavior.
+- Add or update regression coverage for behavior changes and run the smallest relevant checks, followed by `make check` when feasible.
+- Keep documentation aligned with implemented behavior. Do not claim provider, hosted-CI, deployment, release-signing, or user-validation results without direct evidence.
+- Review `git diff --check` and the changed-path list before handing off.

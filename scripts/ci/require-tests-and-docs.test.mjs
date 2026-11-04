@@ -12,6 +12,8 @@ const cases = [
   ['Go tests alone are not production', ['server/handler_test.go'], []],
   ['Go dependency-only updates pass', ['server/go.mod', 'server/go.sum'], []],
   ['Go manifests do not hide production changes', ['server/go.mod', 'server/go.sum', 'server/handler.go', 'README.md'], [missingTests]],
+  ['Base-image-only Dockerfile updates pass', ['server/Dockerfile'], []],
+  ['Dockerfiles do not hide production changes', ['server/Dockerfile', 'server/handler.go', 'README.md'], [missingTests]],
   ['Existing JS and Rust dependency-only paths pass', ['client/package.json', 'client/pnpm-lock.yaml', 'client/src-tauri/Cargo.toml', 'client/src-tauri/Cargo.lock'], []],
   ['Existing JS production guard still fails without tests', ['src/example.ts', 'README.md'], [missingTests]],
   ['Existing JS production with tests and docs passes', ['src/example.ts', 'src/example.test.ts', 'README.md'], []],

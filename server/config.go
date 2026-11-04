@@ -49,6 +49,22 @@ func loadConfigFromEnv() (serverConfig, error) {
 		}
 		cfg.RelayRateLimit = parsed
 	}
+	if err := cfg.validate(); err != nil {
+		return serverConfig{}, err
+	}
 
 	return cfg, nil
+}
+
+func (cfg serverConfig) validate() error {
+	if cfg.MaxSessions <= 0 {
+		return fmt.Errorf("RELAY_MAX_SESSIONS must be positive")
+	}
+	if cfg.SessionTTL <= 0 {
+		return fmt.Errorf("RELAY_SESSION_TTL must be positive")
+	}
+	if cfg.RelayRateLimit <= 0 {
+		return fmt.Errorf("RELAY_RATE_LIMIT must be positive")
+	}
+	return nil
 }

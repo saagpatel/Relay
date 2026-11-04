@@ -2,147 +2,34 @@
 
 ## Overview
 
-Relay uses end-to-end encryption with no trusted third party. The signaling server is untrusted and cannot decrypt file contents.
+Relay encrypts file contents between peers with AES-256-GCM using a key derived through SPAKE2. The signaling server forwards signaling data and, during relay transfers, encrypted file frames. It does not receive plaintext file contents. It can observe peer network addresses, transfer timing, and file metadata including names, sizes, relative paths, and checksums.
 
-## Cryptography
+## Key exchange and peer authentication
 
-### SPAKE2 Key Exchange
+The human-readable transfer code is both the signaling rendezvous identifier and the SPAKE2 shared password. Anyone who obtains the code can attempt to join the session and knows the password used for key exchange. Share it only with the intended recipient.
 
-**Purpose**: Derive shared encryption key from transfer code (password)
+QUIC uses self-signed peer certificates, and the clients do not verify those certificates. The code's SPAKE2 exchange is not bound to the QUIC certificate fingerprints. The current design therefore does not provide certificate-based peer identity or a verified QUIC peer binding. A malicious signaling service or active network attacker may be able to interfere with peer negotiation. Do not treat the transport as providing protection against every active man-in-the-middle attack.
 
-- **Algorithm**: SPAKE2 (Ed25519 group)
-- **Password**: Transfer code (e.g., `42-elephant-zebra`)
-- **Output**: 32-byte shared secret
-- **Protection**: Prevents MITM attacks during key derivation
-- **Implementation**: `spake2` crate (v0.4)
+## File encryption and integrity
 
-**Security Properties**:
-- Both parties must know the code
-- Server cannot derive the key (even if it sees messages)
-- Resistant to offline dictionary attacks
+- File chunks use AES-256-GCM with nonces derived from the file and chunk indices. Those indices are also authenticated as associated data.
+- Files are split into 256 KiB plaintext chunks.
+- Each file has a SHA-256 checksum that the receiver checks before finalizing it.
+- The Rust peer-message decoder rejects serialized messages larger than 256 MiB. Transfer offers are also bounded by file-count and metadata limits.
 
-### AES-256-GCM Encryption
+These mechanisms provide confidentiality and tamper detection for chunk payloads when the peers have established the intended shared key. They do not hide transfer metadata from the signaling server in relay mode.
 
-**Purpose**: Encrypt file chunks during transfer
+## Destination handling
 
-- **Algorithm**: AES-256-GCM
-- **Key**: Derived from SPAKE2 exchange
-- **Nonce**: 4-byte random prefix + 8-byte counter
-- **Chunk Size**: 256 KB
-- **Implementation**: `ring` crate (v0.17)
+The receiver writes incoming files to the selected save directory. When no directory is configured, the current UI uses `/tmp/relay-received`. The receiver validates offered paths and uses temporary partial files before making verified outputs available. Existing destination files must not be truncated or removed by a failed or cancelled transfer.
 
-**Security Properties**:
-- Authenticated encryption (detects tampering)
-- Unique nonce per chunk (prevents replay)
-- Counter prevents nonce reuse
+## Known limitations
 
-### SHA-256 File Integrity
+- Peer certificates are not verified, and key confirmation or authenticated control messages are not part of the current protocol.
+- The transfer code is both the rendezvous ID and password; avoid sharing it through an untrusted channel.
+- The signaling server sees participant IP addresses and transfer metadata. Relay mode also exposes timing and message sizes.
+- The server's `/health` endpoint is not an authentication or authorization boundary.
 
-**Purpose**: Verify files after transfer
+## Reporting a Vulnerability
 
-- **Algorithm**: SHA-256
-- **Timing**: Computed during transfer, verified after last chunk
-- **Implementation**: `sha2` crate (v0.10)
-
-**Security Properties**:
-- Cryptographic hash (collision-resistant)
-- Detects corruption or tampering
-- Independent of encryption (defense in depth)
-
-## Threat Model
-
-### In Scope
-
-✓ **Passive network eavesdropper**: Cannot decrypt file contents (AES-256-GCM)
-✓ **Active MITM attacker**: Blocked by SPAKE2 key exchange
-✓ **Malicious signaling server**: Sees only encrypted payloads
-✓ **Path traversal attacks**: Sanitized (blocks `..`, absolute paths, null bytes)
-✓ **Data tampering**: Detected by GCM auth tag + SHA-256
-
-### Out of Scope
-
-✗ **Transfer code interception**: If attacker obtains code, they can decrypt (physical security required)
-✗ **Endpoint compromise**: If sender/receiver machine is compromised, files are exposed
-✗ **Traffic analysis**: Signaling server observes IPs, timing, chunk sizes (but not content)
-✗ **DoS attacks**: Rate limiting helps, but determined attacker can exhaust relay bandwidth
-
-## Input Validation
-
-### Path Sanitization (`protocol/reassembler.rs`)
-
-```rust
-fn sanitize_path(p: &str) -> Result<()> {
-  if p.contains("..") { return Err(PathTraversal) }
-  if Path::new(p).is_absolute() { return Err(PathTraversal) }
-  if p.contains('\0') { return Err(PathTraversal) }
-  Ok(())
-}
-```
-
-**Tests**: 9 test cases covering edge cases (multiple `..`, root paths, null bytes)
-
-### Transfer Code Validation (`transfer/code.rs`)
-
-- **Format**: `digit-word-word` (e.g., `42-elephant-zebra`)
-- **Validation**: Regex check, wordlist verification
-- **Entropy**: 8 bits (digit) + 8 bits (word 1) + 8 bits (word 2) = ~16.8M combinations
-
-### Message Length Limits
-
-- **Max chunk size**: 256 KB (configurable)
-- **Max message size**: 16 MB (prevents memory exhaustion)
-- **Max file metadata**: Reasonable name/path lengths
-
-## Known Limitations
-
-1. **Transfer code strength**: ~16.8M combinations (8+8+8 bits from 256-word list)
-   - **Mitigation**: Codes expire after 10 minutes (session TTL)
-   - **Risk**: Brute force requires real-time connection attempts
-
-2. **Signaling server observability**:
-   - Sees IP addresses (sender + receiver)
-   - Sees transfer timing and chunk boundaries
-   - **Mitigation**: Content is encrypted, server is untrusted by design
-
-3. **Relay bandwidth**:
-   - Default rate limit: 10 MB/s per session
-   - **Mitigation**: Prefer direct QUIC when possible
-
-## Vulnerability Gate Policy
-
-- CI vulnerability scanning is hard-fail for:
-  - Go (`govulncheck`)
-  - Rust (`cargo audit`)
-  - JavaScript (`pnpm audit`)
-- Release preflight is hard-fail for required supply-chain evidence:
-  - SBOM artifact
-  - Provenance artifact
-  - Artifact signature record
-
-- Rust advisory exceptions are tracked in `client/src-tauri/.cargo/audit.toml`.
-  - These are currently upstream-driven GTK3/Tauri transitive advisories.
-  - Exceptions are temporary and must be removed as upstream remediations land.
-
-## Vulnerability Disclosure
-
-If you discover a security vulnerability, please report it to:
-
-- **GitHub Issues** (for non-critical issues): https://github.com/your-org/relay/issues
-- **Email** (for critical issues): security@example.com
-
-We commit to:
-- Acknowledging reports within 48 hours
-- Providing fixes within 30 days for critical issues
-- Crediting researchers (unless anonymity requested)
-
-## Security Checklist
-
-Before deploying:
-
-- [ ] Use strong signaling server TLS (Let's Encrypt)
-- [ ] Review session TTL (default: 10 min)
-- [ ] Monitor relay bandwidth usage
-- [ ] Verify transfer codes are communicated securely (out-of-band)
-- [ ] Keep dependencies updated (run `cargo audit` + `go mod verify`)
-- [ ] Enable logging for security events
-- [ ] Review server capacity limits (max sessions: 1000 default)
+Please use the repository's GitHub security reporting channel if available. Avoid posting exploitable details in a public issue before a fix is available.

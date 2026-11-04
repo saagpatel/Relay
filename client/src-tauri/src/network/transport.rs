@@ -14,7 +14,7 @@ pub enum Transport {
     /// Direct QUIC connection (LAN or public IP).
     Direct { send: SendStream, recv: RecvStream },
     /// Relayed through the signaling server's WebSocket.
-    Relayed { ws: RelayStream },
+    Relayed { ws: Box<RelayStream> },
 }
 
 impl Transport {
@@ -46,10 +46,5 @@ impl Transport {
             }
             Transport::Relayed { ws } => ws.close().await,
         }
-    }
-
-    /// Whether this transport is going through the relay server.
-    pub fn is_relayed(&self) -> bool {
-        matches!(self, Transport::Relayed { .. })
     }
 }

@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { transfer, setTransfer, resetTransfer } from "../stores/transfer";
 import { settings } from "../stores/settings";
 import { startSend } from "../lib/tauri-bridge";
+import { cancelTransfer } from "../lib/tauri-bridge";
 import CodeDisplay from "./CodeDisplay";
 import FileList from "./FileList";
 
@@ -91,7 +92,10 @@ export default function SendView() {
 
           <button
             class="text-sm text-[#a0a0a0] hover:text-white transition-colors"
-            onClick={resetTransfer}
+            onClick={async () => {
+              if (transfer.sessionId) await cancelTransfer(transfer.sessionId).catch(() => undefined);
+              resetTransfer();
+            }}
           >
             Back
           </button>

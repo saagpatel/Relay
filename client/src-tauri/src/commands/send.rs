@@ -57,17 +57,16 @@ pub async fn start_send(
     let session_id = session.id.clone();
     let cancel_token = session.cancel_token.clone();
 
-    // Store session
+    // Set up QUIC endpoint (OS-assigned port)
+    let quic = QuicEndpoint::new(0).await.map_err(|e| e.to_string())?;
+    let port = quic.local_addr().map_err(|e| e.to_string())?.port();
+    let local_addr = quic.local_addr().map_err(|e| e.to_string())?;
+
     let store = app.state::<SessionStore>().inner().clone();
     store
         .lock()
         .await
         .insert(session_id.clone(), Arc::new(session));
-
-    // Set up QUIC endpoint (OS-assigned port)
-    let quic = QuicEndpoint::new(0).await.map_err(|e| e.to_string())?;
-    let port = quic.local_addr().map_err(|e| e.to_string())?.port();
-    let local_addr = quic.local_addr().map_err(|e| e.to_string())?;
 
     let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<ProgressEvent>();
     let app_handle = app.clone();
@@ -86,17 +85,18 @@ pub async fn start_send(
 
     // Run the send pipeline in background
     let app_handle2 = app.clone();
+    let cleanup_id = session_id.clone();
     tokio::spawn(async move {
-        let result = run_send_with_signaling(
-            input_paths,
-            quic,
-            local_addr,
-            &code_clone,
-            &server_url,
-            progress_tx.clone(),
-            cancel_token,
-        )
-        .await;
+        let _cleanup_guard =
+            crate::commands::transfer::SessionCleanupGuard::new(store, None, cleanup_id.clone());
+        let cancel_wait = cancel_token.clone();
+        let result = tokio::select! {
+            _ = cancel_wait.cancelled() => Err(crate::error::AppError::Cancelled),
+            result = run_send_with_signaling(
+                input_paths, quic, local_addr, &code_clone,
+                &server_url, (cleanup_id.clone(), progress_tx.clone()), cancel_token,
+            ) => result,
+        };
 
         match result {
             Ok(()) => {
@@ -108,6 +108,7 @@ pub async fn start_send(
                     .emit(
                         "transfer:progress",
                         &ProgressEvent::Error {
+                            session_id: cleanup_id.clone(),
                             message: e.to_string(),
                         },
                     )
@@ -139,12 +140,14 @@ async fn run_send_with_signaling(
     local_addr: std::net::SocketAddr,
     code: &str,
     server_url: &str,
-    progress_tx: mpsc::UnboundedSender<ProgressEvent>,
+    progress: (String, mpsc::UnboundedSender<ProgressEvent>),
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<(), crate::error::AppError> {
+    let (session_id, progress_tx) = progress;
     progress_tx
         .send(ProgressEvent::StateChanged {
-            state: "connecting".into(),
+            session_id: session_id.clone(),
+            state: "waiting".into(),
         })
         .ok();
 
@@ -224,6 +227,7 @@ async fn run_send_with_signaling(
 
             progress_tx
                 .send(ProgressEvent::ConnectionTypeChanged {
+                    session_id: session_id.clone(),
                     connection_type: "direct".into(),
                 })
                 .ok();
@@ -239,13 +243,14 @@ async fn run_send_with_signaling(
 
             progress_tx
                 .send(ProgressEvent::ConnectionTypeChanged {
+                    session_id: session_id.clone(),
                     connection_type: "relay".into(),
                 })
                 .ok();
 
             let ws = signaling.into_ws();
             Transport::Relayed {
-                ws: RelayStream::new(ws),
+                ws: Box::new(RelayStream::new(ws)),
             }
         }
     };
@@ -255,6 +260,7 @@ async fn run_send_with_signaling(
 
     // 8. Run transfer over the established transport
     sender::run_send(
+        session_id,
         files,
         file_infos,
         &mut transport,
@@ -316,11 +322,11 @@ async fn expand_paths(
 /// Recursively walk a directory, returning (absolute_path, relative_path) pairs.
 /// Skips hidden files and common junk files.
 pub async fn expand_directory(
-    dir: &PathBuf,
+    dir: &std::path::Path,
     prefix: &str,
 ) -> Result<Vec<(PathBuf, String)>, crate::error::AppError> {
     let mut result = Vec::new();
-    let mut stack: Vec<(PathBuf, String)> = vec![(dir.clone(), prefix.to_string())];
+    let mut stack: Vec<(PathBuf, String)> = vec![(dir.to_path_buf(), prefix.to_string())];
 
     while let Some((current_dir, current_prefix)) = stack.pop() {
         let mut entries = tokio::fs::read_dir(&current_dir).await?;
@@ -364,9 +370,7 @@ mod tests {
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join(".git/config"), "git config").unwrap();
 
-        let result = expand_directory(&root.to_path_buf(), "test-folder")
-            .await
-            .unwrap();
+        let result = expand_directory(root, "test-folder").await.unwrap();
 
         // Should have readme.txt and docs/guide.md, NOT .DS_Store or .git/*
         assert_eq!(result.len(), 2);

@@ -187,7 +187,7 @@ impl SignalingClient {
         encryption_key: &[u8; 32],
     ) -> AppResult<[u8; 32]> {
         // Encrypt our fingerprint
-        let encryptor = ChunkEncryptor::new(encryption_key)?;
+        let encryptor = ChunkEncryptor::new(encryption_key, 0)?;
         let (ciphertext, nonce) = encryptor.encrypt_one(our_fingerprint)?;
 
         // Pack nonce + ciphertext and base64-encode
