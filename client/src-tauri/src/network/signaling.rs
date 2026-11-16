@@ -264,8 +264,9 @@ impl SignalingClient {
 
     /// Explicit key confirmation. Exchange QUIC certificate fingerprints, each
     /// sealed with the sender's direction key and bound to its role. `encryption_key`
-    /// is the raw SPAKE2 output. Returns the peer's cert fingerprint (still not
-    /// used to verify the QUIC certificate). Requires `register` first.
+    /// is the raw SPAKE2 output. Returns the peer's cert fingerprint, which the
+    /// caller pins on the QUIC connection (`QuicEndpoint::pin_peer` / `connect`).
+    /// Requires `register` first.
     pub async fn exchange_cert_fingerprint(
         &mut self,
         our_fingerprint: &[u8; 32],

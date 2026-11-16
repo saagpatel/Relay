@@ -178,9 +178,11 @@ async fn run_send_with_signaling(
     info!("send: SPAKE2 key exchange complete");
 
     // 5. Exchange cert fingerprints (encrypted with SPAKE2 key)
-    let _peer_fingerprint = signaling
+    let peer_fingerprint = signaling
         .exchange_cert_fingerprint(&quic.cert_fingerprint(), &encryption_key)
         .await?;
+    // Only the receiver whose certificate we just confirmed may connect.
+    quic.pin_peer(peer_fingerprint)?;
     info!("send: cert fingerprint exchange complete");
 
     // 6. Race: wait for QUIC connection from receiver OR a relay request.
@@ -191,7 +193,7 @@ async fn run_send_with_signaling(
 
     let race_outcome: RaceOutcome = tokio::select! {
         result = async {
-            tokio::time::timeout(SENDER_QUIC_TIMEOUT, quic.accept_any()).await
+            tokio::time::timeout(SENDER_QUIC_TIMEOUT, quic.accept_peer()).await
         } => {
             match result {
                 Ok(Ok(conn)) => {

@@ -10,7 +10,7 @@ A transfer code looks like `4-guitar-tiger`. The leading number is the nameplate
 
 After SPAKE2, HKDF-SHA256 splits the shared secret into one key per direction and a chunk key (`crypto/session_keys.rs`). Each peer then sends its QUIC certificate fingerprint sealed with its own direction key and its role as associated data. Opening the peer's message is explicit key confirmation: it proves the peer derived the same key in the opposite role, and a reflected or forged message fails.
 
-QUIC uses self-signed peer certificates, and the clients do not verify those certificates; the exchanged fingerprints are not used to pin them. Integrity therefore comes from the sealed peer channel (`network/secure.rs`), not from QUIC: every frame is opened with the direction key and a per-direction counter nonce, so an on-path attacker who does not know the code cannot forge, replay, reorder or reflect frames, and every frame a peer acts on is the next one its peer sent. Dropping frames is detected only as a stall: the final `TransferComplete` is not acknowledged, so if it is withheld the sender reports success while the receiver never finishes (it does not report a completed transfer). A party that knows the whole code can run its own SPAKE2 exchanges and act as a man in the middle; the signaling server and `ws://` observers see only the nameplate and cannot.
+QUIC uses self-signed peer certificates, pinned in both directions to the fingerprints exchanged during key confirmation (`network/quic.rs`). The receiver, as QUIC client, accepts only the sender's certificate. The sender, as QUIC server, requires a client certificate and accepts only the receiver's, so a stranger who connects first is refused rather than served. Handshake signatures are verified, so a copy of a certificate is useless without its private key. Before pinning, the sender accepts no QUIC connection at all. Integrity of the transfer itself does not depend on this, because it comes from the sealed peer channel (`network/secure.rs`): every frame is opened with the direction key and a per-direction counter nonce, so an on-path attacker who does not know the code cannot forge, replay, reorder or reflect frames, and every frame a peer acts on is the next one its peer sent. Dropping frames is detected only as a stall: the final `TransferComplete` is not acknowledged, so if it is withheld the sender reports success while the receiver never finishes (it does not report a completed transfer). A party that knows the whole code can run its own SPAKE2 exchanges and act as a man in the middle; the signaling server and `ws://` observers see only the nameplate and cannot.
 
 The ProVerif models in `formal/` check these properties; see `formal/README.md` for what is proved and under which abstractions.
 
@@ -29,7 +29,7 @@ The receiver writes incoming files to the selected save directory. When no direc
 
 ## Known limitations
 
-- Peer certificates are not verified or pinned; peer authentication rests entirely on the transfer code.
+- There is no certificate authority: certificates are pinned to fingerprints confirmed under the SPAKE2 key, so peer authentication still rests entirely on the transfer code.
 - Anyone told the whole code can join in the receiver's place; share it only through a channel you trust.
 - The signaling server sees participant IP addresses and nameplates. Relay mode also exposes timing and message sizes.
 - Two words give 65,536 possible passwords per nameplate. That is safe only because guessing is online: one attempt per session, visible to the peers.

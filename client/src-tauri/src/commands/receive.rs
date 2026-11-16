@@ -160,7 +160,9 @@ async fn run_receive_with_signaling(
 
     // 5. Exchange cert fingerprints
     let quic = QuicEndpoint::new(0).await?;
-    let _peer_fingerprint = signaling
+    // The sender's certificate fingerprint, authenticated by key confirmation;
+    // the QUIC connection below accepts only that certificate.
+    let peer_fingerprint = signaling
         .exchange_cert_fingerprint(&quic.cert_fingerprint(), &encryption_key)
         .await?;
     info!("receive: cert fingerprint exchange complete");
@@ -174,7 +176,9 @@ async fn run_receive_with_signaling(
                 "receive: attempting QUIC connect to {addr} (timeout {}s)",
                 RECEIVER_QUIC_TIMEOUT.as_secs()
             );
-            match tokio::time::timeout(RECEIVER_QUIC_TIMEOUT, quic.connect(addr)).await {
+            match tokio::time::timeout(RECEIVER_QUIC_TIMEOUT, quic.connect(addr, peer_fingerprint))
+                .await
+            {
                 Ok(Ok(conn)) => {
                     info!("receive: direct QUIC connection established");
                     signaling.disconnect().await.ok();

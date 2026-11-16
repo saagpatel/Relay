@@ -115,7 +115,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
    - Exchange SPAKE2 messages via signaling server
    - Derive a shared key from the whole code as the SPAKE2 password; the server saw only the nameplate
    - Split the shared secret with HKDF into per-direction keys and a chunk key
-   - Key confirmation: exchange QUIC certificate fingerprints sealed with each side's direction key and role; peers still do not verify the certificates
+   - Key confirmation: exchange QUIC certificate fingerprints sealed with each side's direction key and role; each side then pins the other's certificate for the direct QUIC connection
 
 4. **Connection Negotiation** (Both)
    - **Try Direct**: Receiver connects to sender's QUIC endpoint
@@ -142,7 +142,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 ### Threat Model
 - **Users trust each other**: Share the transfer code only with the intended peer. Its nameplate is the public room number; the whole code is the SPAKE2 password.
 - **Signaling server**: Sees peer IPs, nameplates, timing and frame sizes, and only sealed peer frames. It never learns a code's words, so even a malicious server can only guess them online, one attempt per session.
-- **Peer identity**: QUIC peer certificates are self-signed and not verified. Against an attacker without the code, the sealed peer channel and key confirmation provide mutual authentication from the code; see `formal/README.md`.
+- **Peer identity**: QUIC peer certificates are self-signed, and each side pins the other's to the fingerprint it confirmed under the SPAKE2 key (mutual TLS, real handshake signature checks). Against an attacker without the code, key confirmation, pinning and the sealed peer channel provide mutual authentication from the code; see `formal/README.md`.
 
 ### Encryption Layers
 

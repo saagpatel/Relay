@@ -171,11 +171,17 @@ async fn test_signaling_spake2_exchange() {
 #[tokio::test]
 async fn test_quic_basic_connectivity() {
     let server_quic = QuicEndpoint::new(0).await.unwrap();
+    let client_quic = QuicEndpoint::new(0).await.unwrap();
+    // Each side pins the other's certificate, as after key confirmation.
+    server_quic
+        .pin_peer(client_quic.cert_fingerprint())
+        .unwrap();
+    let server_fp = server_quic.cert_fingerprint();
     let server_addr = server_quic.local_addr().unwrap();
     let connect_addr: SocketAddr = format!("127.0.0.1:{}", server_addr.port()).parse().unwrap();
 
     let server_handle = tokio::spawn(async move {
-        let conn = server_quic.accept_any().await.unwrap();
+        let conn = server_quic.accept_peer().await.unwrap();
         let (send, recv) = conn.open_bi().await.unwrap();
         let mut transport = Transport::Direct { send, recv };
         let (mut channel, _) =
@@ -201,8 +207,7 @@ async fn test_quic_basic_connectivity() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let client_quic = QuicEndpoint::new(0).await.unwrap();
-    let conn = client_quic.connect(connect_addr).await.unwrap();
+    let conn = client_quic.connect(connect_addr, server_fp).await.unwrap();
     let (send, recv) = conn.accept_bi().await.unwrap();
     let mut transport = Transport::Direct { send, recv };
     let (mut channel, _) =
@@ -262,16 +267,17 @@ async fn test_full_file_transfer() {
         let peer_msg = signaling.exchange_spake2(&outbound).await.unwrap();
         let key = kx.finish(&peer_msg).unwrap();
 
-        let _peer_fp = signaling
+        let peer_fp = signaling
             .exchange_cert_fingerprint(&quic.cert_fingerprint(), &key)
             .await
             .unwrap();
+        quic.pin_peer(peer_fp).unwrap();
         signaling.disconnect().await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Accept QUIC connection and create transport
-        let conn = quic.accept_any().await.unwrap();
+        let conn = quic.accept_peer().await.unwrap();
         let (send, recv) = conn.open_bi().await.unwrap();
         let mut transport = Transport::Direct { send, recv };
 
@@ -315,17 +321,18 @@ async fn test_full_file_transfer() {
         let key = kx.finish(&peer_msg).unwrap();
 
         let quic = QuicEndpoint::new(0).await.unwrap();
-        let _peer_fp = signaling
+        let peer_fp = signaling
             .exchange_cert_fingerprint(&quic.cert_fingerprint(), &key)
             .await
             .unwrap();
+        quic.pin_peer(peer_fp).unwrap();
         signaling.disconnect().await.unwrap();
 
         let sender_addr: SocketAddr = format!("{}:{}", peer_info.local_ip, peer_info.local_port)
             .parse()
             .unwrap();
 
-        let conn = quic.connect(sender_addr).await.unwrap();
+        let conn = quic.connect(sender_addr, peer_fp).await.unwrap();
         let (send, recv) = conn.accept_bi().await.unwrap();
         let mut transport = Transport::Direct { send, recv };
 
@@ -569,15 +576,16 @@ async fn test_folder_transfer() {
         let peer_msg = signaling.exchange_spake2(&outbound).await.unwrap();
         let key = kx.finish(&peer_msg).unwrap();
 
-        let _peer_fp = signaling
+        let peer_fp = signaling
             .exchange_cert_fingerprint(&quic.cert_fingerprint(), &key)
             .await
             .unwrap();
+        quic.pin_peer(peer_fp).unwrap();
         signaling.disconnect().await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let conn = quic.accept_any().await.unwrap();
+        let conn = quic.accept_peer().await.unwrap();
         let (send, recv) = conn.open_bi().await.unwrap();
         let mut transport = Transport::Direct { send, recv };
 
@@ -614,17 +622,18 @@ async fn test_folder_transfer() {
         let key = kx.finish(&peer_msg).unwrap();
 
         let quic = QuicEndpoint::new(0).await.unwrap();
-        let _peer_fp = signaling
+        let peer_fp = signaling
             .exchange_cert_fingerprint(&quic.cert_fingerprint(), &key)
             .await
             .unwrap();
+        quic.pin_peer(peer_fp).unwrap();
         signaling.disconnect().await.unwrap();
 
         let sender_addr: SocketAddr = format!("{}:{}", peer_info.local_ip, peer_info.local_port)
             .parse()
             .unwrap();
 
-        let conn = quic.connect(sender_addr).await.unwrap();
+        let conn = quic.connect(sender_addr, peer_fp).await.unwrap();
         let (send, recv) = conn.accept_bi().await.unwrap();
         let mut transport = Transport::Direct { send, recv };
 

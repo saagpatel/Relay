@@ -49,7 +49,7 @@ The client uses `ws://localhost:8080` as its default signaling URL. Run a local 
 
 ### Known risks
 
-- QUIC peer certificates are not verified. Peer authentication rests on the transfer code.
+- Peer authentication rests on the transfer code. Each side pins the other's QUIC certificate to the fingerprint confirmed under the SPAKE2 key; there is no certificate authority.
 - The signaling server cannot read file contents or names and never learns the code's words, so it cannot impersonate a peer except by guessing the words online (1 in 65,536 per attempt, and a wrong guess fails key confirmation visibly). It observes peer IP addresses, the nameplate, timing and frame sizes.
 - Direct QUIC, relay fallback, multi-file transfers, and destination safety need continued coverage as transport and receiver code changes.
 
