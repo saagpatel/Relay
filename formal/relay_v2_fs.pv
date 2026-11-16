@@ -1,0 +1,7 @@
+(* P7 forward secrecy (2.0.0): the code leaks after the sessions end (phase 1).
+   Contents of earlier transfers must stay secret. *)
+free pw: bitstring [private].
+query attacker(file_content).
+
+process
+  ( ( !Sender(pw) ) | ( !Receiver(pw) ) | ( phase 1; out(c, pw) ) )

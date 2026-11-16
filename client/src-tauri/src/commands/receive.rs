@@ -40,7 +40,7 @@ pub async fn start_receive(
             .map_err(|e| format!("Cannot create save directory: {e}"))?;
     }
 
-    info!("receive: starting with code '{code}'");
+    info!("receive: starting");
 
     let session = TransferSession::new(
         TransferRole::Receiver,

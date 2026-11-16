@@ -6,7 +6,9 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::crypto::aes_gcm::ChunkEncryptor;
+use crate::crypto::session_keys::Role;
 use crate::error::{AppError, AppResult};
+use crate::network::secure::SecureChannel;
 use crate::network::transport::Transport;
 use crate::protocol::chunker::FileChunker;
 use crate::protocol::messages::{FileInfo, PeerMessage};
@@ -14,6 +16,7 @@ use crate::protocol::version::CURRENT_PROTOCOL_VERSION;
 use crate::transfer::progress::{ProgressEvent, ProgressTracker};
 
 /// Run the sender pipeline over an established transport (QUIC or relay).
+/// `encryption_key` is the raw SPAKE2 output; directional keys are derived here.
 ///
 /// `files` — absolute paths to each file on disk (one per FileInfo entry).
 /// `file_infos` — metadata including name, size, and optional relative_path for folders.
@@ -27,6 +30,9 @@ pub async fn run_send(
     cancel: tokio_util::sync::CancellationToken,
 ) -> AppResult<()> {
     info!("sender: starting transfer ({} files)", files.len());
+    // Every peer frame from here on is sealed under the sender->receiver key and
+    // opened under the receiver->sender key (protocol 3.0.0).
+    let (mut channel, keys) = SecureChannel::from_shared(transport, &encryption_key, Role::Sender)?;
     if files.len() > 4096 || files.len() > u16::MAX as usize + 1 || files.len() != file_infos.len()
     {
         return Err(AppError::Transfer("invalid file count".into()));
@@ -50,15 +56,15 @@ pub async fn run_send(
     let total_bytes: u64 = file_infos.iter().map(|f| f.size).sum();
 
     // Send file offer
-    transport
-        .send_peer_message(&PeerMessage::FileOffer {
+    channel
+        .send(&PeerMessage::FileOffer {
             protocol_version: Some(CURRENT_PROTOCOL_VERSION.to_string()),
             files: file_infos.clone(),
         })
         .await?;
 
     // Wait for accept/decline
-    let response = transport.recv_peer_message().await?;
+    let response = channel.recv().await?;
     match response {
         PeerMessage::FileAccept => {
             info!("sender: peer accepted transfer");
@@ -78,7 +84,7 @@ pub async fn run_send(
     for (file_index, path) in files.iter().enumerate() {
         let wire_index = u16::try_from(file_index)
             .map_err(|_| AppError::Transfer("too many files in transfer".into()))?;
-        let encryptor = ChunkEncryptor::new(&encryption_key, file_index as u32)?;
+        let encryptor = ChunkEncryptor::new(&keys.chunk, file_index as u32)?;
         let mut chunker = FileChunker::new(path, encryptor).await?;
         let file_name = &file_infos[file_index].name;
 
@@ -87,8 +93,8 @@ pub async fn run_send(
         // Send chunks
         while let Some((data, nonce, chunk_index)) = chunker.next_chunk().await? {
             if cancel.is_cancelled() {
-                transport
-                    .send_peer_message(&PeerMessage::Cancel {
+                channel
+                    .send(&PeerMessage::Cancel {
                         reason: "cancelled by sender".into(),
                     })
                     .await
@@ -97,8 +103,8 @@ pub async fn run_send(
             }
 
             let chunk_len = data.len().saturating_sub(16) as u64;
-            transport
-                .send_peer_message(&PeerMessage::FileChunk {
+            channel
+                .send(&PeerMessage::FileChunk {
                     file_index: wire_index,
                     chunk_index,
                     data,
@@ -122,15 +128,15 @@ pub async fn run_send(
 
         // Send file complete with checksum
         let checksum = chunker.finalize();
-        transport
-            .send_peer_message(&PeerMessage::FileComplete {
+        channel
+            .send(&PeerMessage::FileComplete {
                 file_index: wire_index,
                 sha256: checksum,
             })
             .await?;
 
         // Wait for verification
-        let verify = transport.recv_peer_message().await?;
+        let verify = channel.recv().await?;
         match verify {
             PeerMessage::FileVerified {
                 file_index: ack_index,
@@ -160,12 +166,10 @@ pub async fn run_send(
     }
 
     // Send transfer complete
-    transport
-        .send_peer_message(&PeerMessage::TransferComplete)
-        .await?;
+    channel.send(&PeerMessage::TransferComplete).await?;
 
     // Finish the send side
-    transport.finish_send().await?;
+    channel.finish_send().await?;
 
     // Wait briefly for the receiver to process the TransferComplete message
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

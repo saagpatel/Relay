@@ -2,22 +2,26 @@
 
 ## Overview
 
-Relay encrypts file contents between peers with AES-256-GCM using a key derived through SPAKE2. The signaling server forwards signaling data and, during relay transfers, encrypted file frames. It does not receive plaintext file contents. It can observe peer network addresses, transfer timing, and file metadata including names, sizes, relative paths, and checksums.
+Relay encrypts file contents between peers with AES-256-GCM using keys derived through SPAKE2. Since protocol 3.0.0 every peer message (offer, accept, chunks, checksums, acknowledgements) is sealed and authenticated, on the direct QUIC path and through the relay alike. A signaling server that only forwards traffic sees peer network addresses, transfer timing and frame sizes, but not file names, paths, checksums or contents. Because the server learns the transfer code (see below), a malicious server can still impersonate each peer to the other; nothing in the protocol protects against that.
 
 ## Key exchange and peer authentication
 
 The human-readable transfer code is both the signaling rendezvous identifier and the SPAKE2 shared password. Anyone who obtains the code can attempt to join the session and knows the password used for key exchange. Share it only with the intended recipient.
 
-QUIC uses self-signed peer certificates, and the clients do not verify those certificates. The code's SPAKE2 exchange is not bound to the QUIC certificate fingerprints. The current design therefore does not provide certificate-based peer identity or a verified QUIC peer binding. A malicious signaling service or active network attacker may be able to interfere with peer negotiation. Do not treat the transport as providing protection against every active man-in-the-middle attack.
+After SPAKE2, HKDF-SHA256 splits the shared secret into one key per direction and a chunk key (`crypto/session_keys.rs`). Each peer then sends its QUIC certificate fingerprint sealed with its own direction key and its role as associated data. Opening the peer's message is explicit key confirmation: it proves the peer derived the same key in the opposite role, and a reflected or forged message fails.
+
+QUIC uses self-signed peer certificates, and the clients do not verify those certificates; the exchanged fingerprints are not used to pin them. Integrity therefore comes from the sealed peer channel (`network/secure.rs`), not from QUIC: every frame is opened with the direction key and a per-direction counter nonce, so an on-path attacker who does not know the code cannot forge, replay, reorder or reflect frames, and every frame a peer acts on is the next one its peer sent. Dropping frames is detected only as a stall: the final `TransferComplete` is not acknowledged, so if it is withheld the sender reports success while the receiver never finishes (it does not report a completed transfer). A party that knows the code (including the signaling server and anyone who can read a `ws://` signaling URL) can run its own SPAKE2 exchanges and act as a man in the middle.
+
+The ProVerif models in `formal/` check these properties; see `formal/README.md` for what is proved and under which abstractions.
 
 ## File encryption and integrity
 
 - File chunks use AES-256-GCM with nonces derived from the file and chunk indices. Those indices are also authenticated as associated data.
 - Files are split into 256 KiB plaintext chunks.
 - Each file has a SHA-256 checksum that the receiver checks before finalizing it.
-- The Rust peer-message decoder rejects serialized messages larger than 256 MiB. Transfer offers are also bounded by file-count and metadata limits.
+- Peers refuse frames larger than 4 MiB before buffering them, and the server refuses peer messages larger than one frame. Transfer offers are also bounded by file-count and metadata limits.
 
-These mechanisms provide confidentiality and tamper detection for chunk payloads when the peers have established the intended shared key. They do not hide transfer metadata from the signaling server in relay mode.
+These mechanisms provide confidentiality and tamper detection for chunk payloads and transfer metadata when the peers have established the intended shared key. Relay mode still exposes timing and frame sizes.
 
 ## Destination handling
 
@@ -25,9 +29,10 @@ The receiver writes incoming files to the selected save directory. When no direc
 
 ## Known limitations
 
-- Peer certificates are not verified, and key confirmation or authenticated control messages are not part of the current protocol.
+- Peer certificates are not verified or pinned; peer authentication rests entirely on the transfer code.
 - The transfer code is both the rendezvous ID and password; avoid sharing it through an untrusted channel.
-- The signaling server sees participant IP addresses and transfer metadata. Relay mode also exposes timing and message sizes.
+- The signaling server sees participant IP addresses and the transfer code. Relay mode also exposes timing and message sizes.
+- Protocol 3.0.0 peers and servers refuse 2.x; clients and self-hosted servers must be upgraded together.
 - The server's `/health` endpoint is not an authentication or authorization boundary.
 
 ## Reporting a Vulnerability

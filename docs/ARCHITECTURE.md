@@ -114,7 +114,8 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 3. **Key Exchange** (Both)
    - Exchange SPAKE2 messages via signaling server
    - Derive a shared key from the transfer code, which is both the rendezvous ID and password
-   - Exchange QUIC certificate fingerprints as signaling data; peers do not verify the certificates
+   - Split the shared secret with HKDF into per-direction keys and a chunk key
+   - Key confirmation: exchange QUIC certificate fingerprints sealed with each side's direction key and role; peers still do not verify the certificates
 
 4. **Connection Negotiation** (Both)
    - **Try Direct**: Receiver connects to sender's QUIC endpoint
@@ -123,6 +124,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
    - Server accepts relay → establishes relay loop
 
 5. **File Transfer** (Both)
+   - Every peer message from here on is sealed with the sender's direction key and a counter nonce (`network/secure.rs`)
    - Sender offers files (metadata: name, size, path)
    - Receiver accepts/declines
    - For each file:
@@ -139,14 +141,14 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 
 ### Threat Model
 - **Users trust each other**: Share the transfer code only with the intended peer. It is both the rendezvous identifier and the SPAKE2 password.
-- **Signaling server**: Cannot decrypt file contents, but sees peer IPs and file metadata; relay mode exposes timing and frame sizes.
-- **Peer identity**: QUIC peer certificates are self-signed and not verified. SPAKE2 is not bound to the QUIC certificate fingerprints, so active peer impersonation is not ruled out.
+- **Signaling server**: An honest, forwarding server sees peer IPs, the transfer code, timing and frame sizes, but only sealed peer frames. Because it knows the code, a malicious server can impersonate either peer.
+- **Peer identity**: QUIC peer certificates are self-signed and not verified. Against an attacker without the code, the sealed peer channel and key confirmation provide mutual authentication from the code; see `formal/README.md`.
 
 ### Encryption Layers
 
 1. **Key Exchange**: SPAKE2 (symmetric, password = transfer code)
-   - Prevents MITM attacks during key derivation
-   - Both parties must know the code
+   - Prevents MITM attacks during key derivation by anyone who does not know the code
+   - Both parties must know the code; explicit key confirmation follows
 
 2. **Transport Encryption**: AES-256-GCM
    - Chunk-level encryption with nonces derived from file and chunk indices
@@ -163,7 +165,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 - **Path Traversal**: Validates and confines output paths to the selected save directory
 - **Code Validation**: Enforces digit-word-word format
 - **Offer Limits**: File count and metadata size are bounded
-- **Message Length**: Rust peer-message decoder rejects messages above 256 MiB
+- **Message Length**: peers refuse frames above 4 MiB before authenticating them, and the server refuses peer messages above one frame
 - **Signaling route**: WebSocket connections use `/ws/{code}`; the default client URL is `ws://localhost:8080`
 - **Destination default**: When no save directory is configured, the UI uses `/tmp/relay-received`
 

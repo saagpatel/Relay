@@ -1,6 +1,6 @@
 # Relay
 
-Relay is a desktop file transfer app. It tries a direct QUIC connection first and uses a WebSocket relay when direct connectivity is unavailable. File contents are encrypted end to end; the signaling server can see transfer metadata such as file names, sizes, relative paths, and checksums during relayed transfers.
+Relay is a desktop file transfer app. It tries a direct QUIC connection first and uses a WebSocket relay when direct connectivity is unavailable. File contents and transfer metadata are encrypted and authenticated end to end; the signaling server sees peer addresses, the transfer code, timing and frame sizes.
 
 ## Quick Start
 
@@ -50,7 +50,7 @@ The client uses `ws://localhost:8080` as its default signaling URL. Run a local 
 ### Known risks
 
 - QUIC peer certificates are not verified. The transfer code is both the rendezvous identifier and the shared password.
-- The signaling server cannot decrypt file contents, but it can observe peer IP addresses, timing, file names, sizes, paths, and checksums in relay mode.
+- A forwarding signaling server cannot read file contents or names, but it observes peer IP addresses, the transfer code, timing and frame sizes. It knows the code, so a malicious server could impersonate a peer.
 - Direct QUIC, relay fallback, multi-file transfers, and destination safety need continued coverage as transport and receiver code changes.
 
 ### Next steps

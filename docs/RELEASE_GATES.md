@@ -24,7 +24,6 @@ This document defines the minimum release gates for Relay and maps them to concr
 - CI vulnerability scanning is hard-fail via `govulncheck`, `cargo audit`, and `pnpm audit`.
 - `scripts/ci/check-release-evidence.mjs` enforces G3/G5 evidence in enforced mode and template presence pre-credentials.
 - `scripts/ci/check-release-materials.mjs` enforces required release materials in release preflight.
-- Detailed release governance templates live in `docs/release/`.
 
 ## Promotion policy
 

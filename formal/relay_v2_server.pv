@@ -1,0 +1,8 @@
+(* P8 malicious signaling server or ws:// observer (2.0.0): the code is in the
+   URL path /ws/{code}, so this attacker knows the SPAKE2 password from the start.
+   Documented in docs/SECURITY.md; expected to fail. *)
+free pw: bitstring [private].
+query attacker(file_content).
+
+process
+  ( out(c, pw) | ( !Sender(pw) ) | ( !Receiver(pw) ) )

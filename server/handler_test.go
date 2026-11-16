@@ -240,3 +240,31 @@ func TestDisconnect(t *testing.T) {
 		t.Errorf("expected 0 sessions after disconnect, got %d", srv.SessionCount())
 	}
 }
+
+// Regression: the server buffered messages of up to 256 MiB from any peer
+// before forwarding them. A peer message must not exceed one relay frame.
+func TestOversizedPeerMessageIsRefused(t *testing.T) {
+	_, ts := newTestServer(t, 100, 10*time.Minute)
+	defer ts.Close()
+
+	sender := dialWS(t, ts, "oversize")
+	defer sender.Close()
+	receiver := dialWS(t, ts, "oversize")
+	defer receiver.Close()
+	register(sender, "sender")
+	register(receiver, "receiver")
+	readMsg(t, sender)
+	readMsg(t, receiver)
+
+	huge := SignalMessage{Type: "spake2", Message: strings.Repeat("A", 8*1024*1024)}
+	// The server may cut the connection mid-write; that is the refusal.
+	_ = sender.WriteJSON(huge)
+
+	msg := readMsg(t, receiver)
+	if msg.Type == "spake2" {
+		t.Fatalf("server forwarded an %d-byte message", len(msg.Message))
+	}
+	if msg.Type != "peer_disconnected" {
+		t.Fatalf("expected peer_disconnected, got %q", msg.Type)
+	}
+}

@@ -41,8 +41,8 @@ impl ChunkEncryptor {
         Ok((in_out, nonce_bytes))
     }
 
-    /// Encrypt a small signaling payload with a fresh random nonce.
-    pub fn encrypt_one(self, plaintext: &[u8]) -> AppResult<(Vec<u8>, [u8; 12])> {
+    /// Encrypt a small signaling payload with a fresh random nonce, binding `aad`.
+    pub fn encrypt_one(self, plaintext: &[u8], aad: &[u8]) -> AppResult<(Vec<u8>, [u8; 12])> {
         let mut nonce = [0; 12];
         ring::rand::SystemRandom::new()
             .fill(&mut nonce)
@@ -51,7 +51,7 @@ impl ChunkEncryptor {
         self.key
             .seal_in_place_append_tag(
                 Nonce::assume_unique_for_key(nonce),
-                Aad::empty(),
+                Aad::from(aad),
                 &mut in_out,
             )
             .map_err(|_| AppError::Crypto("AES-GCM encryption failed".into()))?;
@@ -72,8 +72,13 @@ impl ChunkDecryptor {
         })
     }
 
-    pub fn decrypt_one(self, ciphertext: &[u8], nonce: &[u8; 12]) -> AppResult<Vec<u8>> {
-        self.decrypt_with_aad(ciphertext, nonce, Aad::from(&[][..]))
+    pub fn decrypt_one(
+        self,
+        ciphertext: &[u8],
+        nonce: &[u8; 12],
+        aad: &[u8],
+    ) -> AppResult<Vec<u8>> {
+        self.decrypt_with_aad(ciphertext, nonce, Aad::from(aad))
     }
 
     pub fn decrypt_chunk(

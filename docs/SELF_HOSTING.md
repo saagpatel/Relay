@@ -49,5 +49,6 @@ The response reports server health and the current active-session count.
 
 - Sessions are held in memory and are not shared across server instances.
 - Configure the client URL with `wss://` when the reverse proxy provides TLS.
-- The signaling server forwards peer signaling and relayed ciphertext. It can see participant network addresses and transfer metadata; it does not decrypt file contents.
+- The signaling server forwards peer signaling and relayed ciphertext. It can see participant network addresses, transfer codes, timing and frame sizes. Peer messages, including file names and checksums, are sealed end to end, but a server that knows the code could impersonate a peer, so run your own server if that matters.
+- Server and clients speak protocol 3.0.0 and refuse 2.x. Upgrade the server and every client together.
 - Choose session and relay limits for the capacity of the host. The defaults are configuration values, not a capacity guarantee.

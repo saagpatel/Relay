@@ -13,7 +13,9 @@ struct ParsedVersion {
 }
 
 /// Current wire protocol version used by Relay peers/signaling metadata.
-pub const CURRENT_PROTOCOL_VERSION: &str = "2.0.0";
+/// 3.0.0: every peer frame is sealed under direction-split HKDF keys and key
+/// confirmation is role-bound. 2.x peers are refused (major mismatch).
+pub const CURRENT_PROTOCOL_VERSION: &str = "3.0.0";
 
 /// Human-readable policy marker for docs/telemetry.
 pub const COMPATIBILITY_POLICY: &str = "N-1 minor (same major)";
@@ -65,25 +67,27 @@ mod tests {
 
     #[test]
     fn accepts_same_minor() {
-        assert!(is_peer_protocol_compatible("2.0.0"));
-        assert!(is_peer_protocol_compatible("2.0.9"));
+        assert!(is_peer_protocol_compatible("3.0.0"));
+        assert!(is_peer_protocol_compatible("3.0.9"));
     }
 
     #[test]
     fn accepts_n_minus_one_minor() {
-        assert!(is_peer_protocol_compatible("2.0.0"));
-        assert!(is_peer_protocol_compatible("2.0.99"));
+        assert!(is_peer_protocol_compatible("3.0.0"));
+        assert!(is_peer_protocol_compatible("3.0.99"));
     }
 
     #[test]
     fn rejects_older_than_n_minus_one() {
-        assert!(!is_peer_protocol_compatible("1.9.0"));
+        assert!(!is_peer_protocol_compatible("2.9.0"));
+        // 2.x peers send unauthenticated frames; they must never be accepted.
+        assert!(!is_peer_protocol_compatible("2.0.0"));
     }
 
     #[test]
     fn rejects_newer_minor_or_major() {
-        assert!(!is_peer_protocol_compatible("2.1.0"));
-        assert!(!is_peer_protocol_compatible("3.0.0"));
+        assert!(!is_peer_protocol_compatible("3.1.0"));
+        assert!(!is_peer_protocol_compatible("4.0.0"));
     }
 
     #[test]

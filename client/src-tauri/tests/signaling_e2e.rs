@@ -9,9 +9,11 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
 
+use relay_lib::crypto::session_keys::Role;
 use relay_lib::crypto::spake::KeyExchange;
 use relay_lib::network::quic::QuicEndpoint;
 use relay_lib::network::relay::RelayStream;
+use relay_lib::network::secure::SecureChannel;
 use relay_lib::network::signaling::SignalingClient;
 use relay_lib::network::transport::Transport;
 use relay_lib::protocol::messages::FileInfo;
@@ -172,10 +174,12 @@ async fn test_quic_basic_connectivity() {
         let conn = server_quic.accept_any().await.unwrap();
         let (send, recv) = conn.open_bi().await.unwrap();
         let mut transport = Transport::Direct { send, recv };
+        let (mut channel, _) =
+            SecureChannel::from_shared(&mut transport, &[0x42; 32], Role::Sender).unwrap();
 
         use relay_lib::protocol::messages::{FileInfo, PeerMessage};
-        transport
-            .send_peer_message(&PeerMessage::FileOffer {
+        channel
+            .send(&PeerMessage::FileOffer {
                 protocol_version: Some(CURRENT_PROTOCOL_VERSION.to_string()),
                 files: vec![FileInfo {
                     name: "test.txt".into(),
@@ -186,9 +190,9 @@ async fn test_quic_basic_connectivity() {
             .await
             .unwrap();
 
-        let response = transport.recv_peer_message().await.unwrap();
+        let response = channel.recv().await.unwrap();
         eprintln!("server: got response: {:?}", response);
-        transport.finish_send().await.unwrap();
+        channel.finish_send().await.unwrap();
     });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -197,15 +201,14 @@ async fn test_quic_basic_connectivity() {
     let conn = client_quic.connect(connect_addr).await.unwrap();
     let (send, recv) = conn.accept_bi().await.unwrap();
     let mut transport = Transport::Direct { send, recv };
+    let (mut channel, _) =
+        SecureChannel::from_shared(&mut transport, &[0x42; 32], Role::Receiver).unwrap();
 
     use relay_lib::protocol::messages::PeerMessage;
-    let offer = transport.recv_peer_message().await.unwrap();
+    let offer = channel.recv().await.unwrap();
     eprintln!("client: received: {:?}", offer);
 
-    transport
-        .send_peer_message(&PeerMessage::FileDecline)
-        .await
-        .unwrap();
+    channel.send(&PeerMessage::FileDecline).await.unwrap();
 
     server_handle.await.unwrap();
 }

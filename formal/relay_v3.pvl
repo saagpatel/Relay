@@ -1,0 +1,172 @@
+(* Relay pairing handshake and transfer, protocol 3.0.0 (the fix on this branch).
+   Same attacker and primitives as relay_v2.pvl; differences are marked [3.0.0].
+   Every line below cites the Rust source it models. See formal/README.md.
+
+   Attacker: Dolev-Yao on channel c. c carries signaling (the server forwards
+   spake2/cert_fingerprint frames to whoever is in the room, handler.go), the
+   direct QUIC stream (certificates are never verified, quic.rs SkipServerVerification,
+   accept_any) and the relay WebSocket (relay.go forwards binary frames verbatim).
+   The transfer code pw is not given to the attacker here; relay_v3_server.pv
+   gives it away to model the signaling server or a ws:// observer, which sees
+   it in the URL path /ws/{code} (signaling.rs connect). *)
+
+free c: channel.
+
+type G.
+type exponent.
+type key.
+
+(* ---- SPAKE2 over Ed25519, symmetric mode (spake.rs start_symmetric) ---- *)
+const g: G [data].
+fun exp(G, exponent): G.
+equation forall x: exponent, y: exponent; exp(exp(g, x), y) = exp(exp(g, y), x).
+
+(* Xs = g^x + pw*S is modeled as a keyed bijection on group elements, the
+   standard ideal-cipher abstraction of a PAKE blinding (ProVerif manual,
+   EKE example). unblind with the wrong password yields an unrelated element. *)
+fun blind(bitstring, G): bitstring.
+fun unblind(bitstring, bitstring): G.
+equation forall p: bitstring, e: G; unblind(p, blind(p, e)) = e.
+equation forall p: bitstring, m: bitstring; blind(p, unblind(p, m)) = m.
+
+(* spake2 0.4 symmetric key: SHA-256(H(pw) || H(id) || sorted(Xs, Ys) || K).
+   Sorting makes the transcript order-independent, so msgs is commutative. *)
+fun msgs(bitstring, bitstring): bitstring.
+equation forall a: bitstring, b: bitstring; msgs(a, b) = msgs(b, a).
+fun spake_key(bitstring, bitstring, G): key.
+
+(* ---- AES-256-GCM (aes_gcm.rs) ---- *)
+fun aead(key, bitstring, bitstring, bitstring): bitstring.
+reduc forall k: key, n: bitstring, a: bitstring, m: bitstring;
+  aead_open(k, n, a, aead(k, n, a, m)) = m.
+
+const empty: bitstring.         (* zero-length plaintext and Aad::empty() *)
+fun sha(bitstring): bitstring.  (* SHA-256, checksum.rs *)
+fun size(bitstring): bitstring. (* FileInfo.size: public length *)
+const zero: bitstring.
+
+(* chunk nonce and AAD from (file_index, chunk_index), aes_gcm.rs make_nonce/aad *)
+const f0: bitstring.
+const c0: bitstring.
+fun chunk_nonce(bitstring, bitstring): bitstring.
+fun chunk_aad(bitstring, bitstring): bitstring.
+
+(* [3.0.0] HKDF-SHA256 key schedule (session_keys.rs SessionKeys::derive) *)
+fun hk(key, bitstring): key.
+const lbl_s2r: bitstring [data].
+const lbl_r2s: bitstring [data].
+const lbl_chunk: bitstring [data].
+(* [3.0.0] confirmation AAD "relay/3.0.0 confirm <role>" (signaling.rs confirmation_aad) *)
+const conf_sender: bitstring [data].
+const conf_receiver: bitstring [data].
+(* [3.0.0] every PeerMessage is sealed: nonce = per-direction counter,
+   AAD = "relay/3.0.0 frame" (secure.rs seal_frame / open_frame) *)
+const frame_ad: bitstring [data].
+const seq0: bitstring [data].
+const seq1: bitstring [data].
+const seq2: bitstring [data].
+const seq3: bitstring [data].
+
+(* ---- PeerMessage (messages.rs), now only ever sent inside a sealed frame ---- *)
+fun FileOffer(bitstring, bitstring): bitstring [data].       (* name, size *)
+const FileAccept: bitstring [data].
+fun FileChunk(bitstring, bitstring, bitstring, bitstring): bitstring [data]. (* fi, ci, data, nonce *)
+fun FileComplete(bitstring, bitstring): bitstring [data].    (* fi, sha256 *)
+fun FileVerified(bitstring): bitstring [data].
+const TransferComplete: bitstring [data].
+
+(* transport chosen by the race in send.rs / receive.rs; attacker can force relay
+   by sending relay_request or blocking QUIC *)
+const direct: bitstring.
+const relayed: bitstring.
+
+free file_content: bitstring [private].
+free file_name: bitstring [private].
+
+(* ---- events ---- *)
+event SenderKey(key).
+event ReceiverKey(key).
+event SenderConfirmed(key).
+event ReceiverConfirmed(key).
+event SenderOffered(key, bitstring, bitstring).
+event ReceiverStored(key, bitstring, bitstring, bitstring).
+event SenderDelivered(key, bitstring, bitstring).
+event ReceiverDone(key, bitstring, bitstring, bitstring).
+
+(* ---- sender: send.rs, sender.rs run_send with SecureChannel (Role::Sender) ---- *)
+let Sender(pw: bitstring) =
+  new x: exponent;
+  let X = blind(pw, exp(g, x)) in
+  out(c, X);
+  in(c, Y: bitstring);
+  let k = spake_key(pw, msgs(X, Y), exp(unblind(pw, Y), x)) in
+  event SenderKey(k);
+  let ksend = hk(k, lbl_s2r) in                         (* [3.0.0] keys.send *)
+  let krecv = hk(k, lbl_r2s) in                         (* [3.0.0] keys.recv *)
+  let kchunk = hk(k, lbl_chunk) in                      (* [3.0.0] keys.chunk *)
+  new fp: bitstring;
+  new n: bitstring;
+  out(c, (n, aead(ksend, n, conf_sender, fp)));         (* [3.0.0] sealed with own direction key *)
+  in(c, (n2: bitstring, ct2: bitstring));
+  let fp2 = aead_open(krecv, n2, conf_receiver, ct2) in (* [3.0.0] peer direction, peer role *)
+  event SenderConfirmed(k);
+  in(c, mode: bitstring);
+  event SenderOffered(k, file_name, file_content);
+  out(c, aead(ksend, seq0, frame_ad, FileOffer(file_name, size(file_content))));
+  in(c, f_acc: bitstring);
+  if aead_open(krecv, seq0, frame_ad, f_acc) = FileAccept then
+  out(c, aead(ksend, seq1, frame_ad,
+     FileChunk(f0, c0, aead(kchunk, chunk_nonce(f0, c0), chunk_aad(f0, c0), file_content),
+               chunk_nonce(f0, c0))));
+  out(c, aead(ksend, seq2, frame_ad, FileComplete(f0, sha(file_content))));
+  in(c, f_ver: bitstring);
+  if aead_open(krecv, seq1, frame_ad, f_ver) = FileVerified(f0) then
+  event SenderDelivered(k, file_name, file_content);
+  out(c, aead(ksend, seq3, frame_ad, TransferComplete)).
+
+(* ---- receiver: receive.rs, receiver.rs run_receive with SecureChannel (Role::Receiver) ---- *)
+let Receiver(pw: bitstring) =
+  new y: exponent;
+  let Y = blind(pw, exp(g, y)) in
+  out(c, Y);
+  in(c, X: bitstring);
+  let k = spake_key(pw, msgs(X, Y), exp(unblind(pw, X), y)) in
+  event ReceiverKey(k);
+  let ksend = hk(k, lbl_r2s) in
+  let krecv = hk(k, lbl_s2r) in
+  let kchunk = hk(k, lbl_chunk) in
+  new fp: bitstring;
+  new n: bitstring;
+  out(c, (n, aead(ksend, n, conf_receiver, fp)));
+  in(c, (n2: bitstring, ct2: bitstring));
+  let fp2 = aead_open(krecv, n2, conf_sender, ct2) in
+  event ReceiverConfirmed(k);
+  in(c, mode: bitstring);
+  in(c, f_off: bitstring);
+  let FileOffer(name: bitstring, sz: bitstring) = aead_open(krecv, seq0, frame_ad, f_off) in
+  out(c, aead(ksend, seq0, frame_ad, FileAccept));
+  (* parenthesized: a bare else would bind to the innermost if *)
+  if sz = zero then (
+    in(c, f_cmp: bitstring);
+    let FileComplete(=f0, h: bitstring) = aead_open(krecv, seq1, frame_ad, f_cmp) in
+    if h = sha(empty) then
+    event ReceiverStored(k, name, empty, mode);
+    out(c, aead(ksend, seq1, frame_ad, FileVerified(f0)));
+    in(c, f_end: bitstring);
+    if aead_open(krecv, seq2, frame_ad, f_end) = TransferComplete then
+    event ReceiverDone(k, name, empty, mode)
+  ) else (
+    in(c, f_chk: bitstring);
+    let FileChunk(=f0, =c0, ct: bitstring, nonce: bitstring) = aead_open(krecv, seq1, frame_ad, f_chk) in
+    if nonce = chunk_nonce(f0, c0) then
+    let data = aead_open(kchunk, nonce, chunk_aad(f0, c0), ct) in
+    if sz = size(data) then
+    in(c, f_cmp: bitstring);
+    let FileComplete(=f0, h: bitstring) = aead_open(krecv, seq2, frame_ad, f_cmp) in
+    if h = sha(data) then
+    event ReceiverStored(k, name, data, mode);
+    out(c, aead(ksend, seq1, frame_ad, FileVerified(f0)));
+    in(c, f_end: bitstring);
+    if aead_open(krecv, seq3, frame_ad, f_end) = TransferComplete then
+    event ReceiverDone(k, name, data, mode)
+  ).

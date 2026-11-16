@@ -4,14 +4,14 @@
 // through the signaling server. This module provides the same send/recv
 // interface as QUIC streams but over WebSocket binary frames.
 //
-// Wire format: same as QUIC — 4-byte big-endian length prefix + MessagePack payload.
+// Wire format: same as QUIC — 4-byte big-endian length prefix + sealed frame
+// (network/secure.rs). The relay only ever sees ciphertext.
 
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::debug;
 
 use crate::error::{AppError, AppResult};
-use crate::protocol::messages::PeerMessage;
 
 /// The underlying WebSocket stream type (same as signaling).
 pub type WsStream =
@@ -28,13 +28,10 @@ impl RelayStream {
         Self { ws }
     }
 
-    /// Send a PeerMessage as a binary WebSocket frame.
-    /// Format: 4-byte big-endian length + MessagePack payload.
-    pub async fn send_message(&mut self, msg: &PeerMessage) -> AppResult<()> {
-        let payload = rmp_serde::to_vec(msg)
-            .map_err(|e| AppError::Serialization(format!("relay encode: {e}")))?;
-
-        let len = payload.len() as u32;
+    /// Send one sealed frame as a binary WebSocket message.
+    pub async fn send_frame(&mut self, payload: Vec<u8>) -> AppResult<()> {
+        let len = u32::try_from(payload.len())
+            .map_err(|_| AppError::Transfer("frame too large".into()))?;
         let mut frame = Vec::with_capacity(4 + payload.len());
         frame.extend_from_slice(&len.to_be_bytes());
         frame.extend_from_slice(&payload);
@@ -47,8 +44,8 @@ impl RelayStream {
         Ok(())
     }
 
-    /// Receive a PeerMessage from a binary WebSocket frame.
-    pub async fn recv_message(&mut self) -> AppResult<PeerMessage> {
+    /// Receive one sealed frame from a binary WebSocket message.
+    pub async fn recv_frame(&mut self) -> AppResult<Vec<u8>> {
         loop {
             let raw = self
                 .ws
@@ -66,6 +63,11 @@ impl RelayStream {
                     }
 
                     let len = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+                    if len > crate::protocol::messages::MAX_FRAME_BYTES {
+                        return Err(AppError::Transfer(format!(
+                            "relay message too large: {len} bytes"
+                        )));
+                    }
 
                     if data.len() != 4 + len {
                         return Err(AppError::Transfer(format!(
@@ -74,10 +76,7 @@ impl RelayStream {
                         )));
                     }
 
-                    let msg: PeerMessage = rmp_serde::from_slice(&data[4..])
-                        .map_err(|e| AppError::Serialization(format!("relay decode: {e}")))?;
-
-                    return Ok(msg);
+                    return Ok(data[4..].to_vec());
                 }
                 Message::Close(_) => {
                     return Err(AppError::WebSocket(

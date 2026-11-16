@@ -5,7 +5,10 @@
 // 2. Send "register" with role + local peer info
 // 3. Wait for "peer_joined" with peer's network info
 // 4. Exchange SPAKE2 messages (forwarded by server)
-// 5. Exchange cert fingerprints (encrypted with SPAKE2-derived key)
+// 5. Key confirmation: exchange cert fingerprints sealed under the
+//    direction-specific key for this role (protocol 3.0.0). A reflected or
+//    forged message fails to open, so finishing this step proves the peer
+//    derived the same SPAKE2 key in the opposite role.
 // 6. Send "disconnect" and close
 
 use std::net::SocketAddr;
@@ -13,10 +16,14 @@ use std::net::SocketAddr;
 use base64::prelude::*;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{
+    connect_async_with_config,
+    tungstenite::{protocol::WebSocketConfig, Message},
+};
 use tracing::{debug, info};
 
 use crate::crypto::aes_gcm::{ChunkDecryptor, ChunkEncryptor};
+use crate::crypto::session_keys::{Role, SessionKeys};
 use crate::error::{AppError, AppResult};
 use crate::protocol::version::{is_peer_protocol_compatible, CURRENT_PROTOCOL_VERSION};
 
@@ -57,6 +64,14 @@ type WsStream =
 /// WebSocket client for the signaling server.
 pub struct SignalingClient {
     ws: WsStream,
+    role: Option<Role>,
+}
+
+/// Associated data for a key-confirmation message sent by `role`.
+fn confirmation_aad(role: Role) -> Vec<u8> {
+    let mut aad = b"relay/3.0.0 confirm ".to_vec();
+    aad.extend_from_slice(role.label());
+    aad
 }
 
 impl SignalingClient {
@@ -65,18 +80,25 @@ impl SignalingClient {
         // Normalize URL: strip trailing slash, build ws path
         let base = server_url.trim_end_matches('/');
         let url = format!("{base}/ws/{code}");
-        info!("signaling: connecting to {url}");
+        info!("signaling: connecting to {base}/ws/<code>");
 
-        let (ws, _response) = connect_async(&url)
+        // Bound what the server or a relayed peer can make us buffer before
+        // anything is authenticated: one relay frame plus its length prefix.
+        let limit = crate::protocol::messages::MAX_FRAME_BYTES + 4;
+        let config = WebSocketConfig::default()
+            .max_message_size(Some(limit))
+            .max_frame_size(Some(limit));
+        let (ws, _response) = connect_async_with_config(&url, Some(config), false)
             .await
             .map_err(|e| AppError::WebSocket(format!("failed to connect: {e}")))?;
 
         info!("signaling: connected");
-        Ok(Self { ws })
+        Ok(Self { ws, role: None })
     }
 
     /// Register with the signaling server as sender or receiver.
     pub async fn register(&mut self, role: &str, local_addr: Option<SocketAddr>) -> AppResult<()> {
+        let parsed_role = Role::parse(role)?;
         let peer_info = local_addr.map(|addr| {
             let ip = addr.ip();
             // Replace unspecified (0.0.0.0) with actual local IP
@@ -104,6 +126,7 @@ impl SignalingClient {
         };
 
         self.send_json(&msg).await?;
+        self.role = Some(parsed_role);
         info!("signaling: registered as {role}");
         Ok(())
     }
@@ -179,16 +202,24 @@ impl SignalingClient {
         }
     }
 
-    /// Exchange QUIC certificate fingerprints, encrypted with the SPAKE2-derived key.
-    /// Returns the peer's cert fingerprint.
+    /// Explicit key confirmation. Exchange QUIC certificate fingerprints, each
+    /// sealed with the sender's direction key and bound to its role. `encryption_key`
+    /// is the raw SPAKE2 output. Returns the peer's cert fingerprint (still not
+    /// used to verify the QUIC certificate). Requires `register` first.
     pub async fn exchange_cert_fingerprint(
         &mut self,
         our_fingerprint: &[u8; 32],
         encryption_key: &[u8; 32],
     ) -> AppResult<[u8; 32]> {
-        // Encrypt our fingerprint
-        let encryptor = ChunkEncryptor::new(encryption_key, 0)?;
-        let (ciphertext, nonce) = encryptor.encrypt_one(our_fingerprint)?;
+        let role = self.role.ok_or_else(|| {
+            AppError::Crypto("key confirmation requires a registered role".into())
+        })?;
+        let keys = SessionKeys::derive(encryption_key, role)?;
+
+        // Seal our fingerprint with the key for our direction
+        let encryptor = ChunkEncryptor::new(&keys.send, 0)?;
+        let (ciphertext, nonce) =
+            encryptor.encrypt_one(our_fingerprint, &confirmation_aad(role))?;
 
         // Pack nonce + ciphertext and base64-encode
         let mut packed = Vec::with_capacity(12 + ciphertext.len());
@@ -229,8 +260,14 @@ impl SignalingClient {
                         .map_err(|_| AppError::WebSocket("bad nonce".into()))?;
                     let ciphertext = &packed[12..];
 
-                    let decryptor = ChunkDecryptor::new(encryption_key)?;
-                    let plaintext = decryptor.decrypt_one(ciphertext, &nonce)?;
+                    let decryptor = ChunkDecryptor::new(&keys.recv)?;
+                    let plaintext = decryptor
+                        .decrypt_one(ciphertext, &nonce, &confirmation_aad(role.peer()))
+                        .map_err(|_| {
+                            AppError::Crypto(
+                                "key confirmation failed: peer does not hold the same key".into(),
+                            )
+                        })?;
 
                     if plaintext.len() != 32 {
                         return Err(AppError::WebSocket(format!(
