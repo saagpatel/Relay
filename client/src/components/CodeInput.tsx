@@ -7,7 +7,8 @@ interface Props {
 }
 
 export default function CodeInput(props: Props) {
-  const [digit, setDigit] = createSignal("");
+  // Nameplate: the room number the server allocated (1-99999, usually short).
+  const [nameplate, setNameplate] = createSignal("");
   const [word1, setWord1] = createSignal("");
   const [word2, setWord2] = createSignal("");
   const [suggestions1, setSuggestions1] = createSignal<string[]>([]);
@@ -22,20 +23,22 @@ export default function CodeInput(props: Props) {
     return WORDLIST.filter((w) => w.startsWith(lower)).slice(0, 5);
   }
 
-  function handleDigitInput(value: string) {
-    const clean = value.replace(/\D/g, "").slice(0, 1);
-    setDigit(clean);
-    if (clean.length === 1) word1Ref?.focus();
+  function handleNameplateInput(value: string) {
+    // A dash typed after the number moves on to the first word.
+    if (value.endsWith("-")) {
+      word1Ref?.focus();
+    }
+    setNameplate(value.replace(/\D/g, "").replace(/^0+/, "").slice(0, 5));
   }
 
   function handleSubmit() {
-    const code = `${digit()}-${word1().toLowerCase()}-${word2().toLowerCase()}`;
+    const code = `${nameplate()}-${word1().toLowerCase()}-${word2().toLowerCase()}`;
     props.onSubmit(code);
   }
 
   function isValid(): boolean {
     return (
-      digit().length === 1 &&
+      nameplate().length >= 1 &&
       WORDLIST.includes(word1().toLowerCase()) &&
       WORDLIST.includes(word2().toLowerCase())
     );
@@ -50,11 +53,12 @@ export default function CodeInput(props: Props) {
         <input
           type="text"
           inputMode="numeric"
-          maxLength={1}
-          value={digit()}
-          onInput={(e) => handleDigitInput(e.currentTarget.value)}
-          class="w-14 h-14 text-center text-2xl font-mono bg-[#1e1e1e] border border-[#333] rounded-lg focus:border-[#3b82f6] focus:outline-none transition-colors"
-          placeholder="0"
+          maxLength={6}
+          value={nameplate()}
+          onInput={(e) => handleNameplateInput(e.currentTarget.value)}
+          aria-label="Transfer code number"
+          class="w-20 h-14 text-center text-2xl font-mono bg-[#1e1e1e] border border-[#333] rounded-lg focus:border-[#3b82f6] focus:outline-none transition-colors"
+          placeholder="1"
           disabled={props.disabled}
         />
         <span class="text-2xl text-[#555]">-</span>

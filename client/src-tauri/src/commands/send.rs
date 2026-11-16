@@ -49,19 +49,33 @@ pub async fn start_send(
         }
     }
 
-    let code = TransferCode::generate();
-    let code_str = code.to_code_string();
-    // The code is the SPAKE2 password: never write it to logs.
-    info!("send: generated transfer code");
-
-    let session = TransferSession::new(TransferRole::Sender, code);
-    let session_id = session.id.clone();
-    let cancel_token = session.cancel_token.clone();
-
     // Set up QUIC endpoint (OS-assigned port)
     let quic = QuicEndpoint::new(0).await.map_err(|e| e.to_string())?;
     let port = quic.local_addr().map_err(|e| e.to_string())?.port();
     let local_addr = quic.local_addr().map_err(|e| e.to_string())?;
+
+    // Ask the signaling server for a nameplate, then pick the password words
+    // locally. The server only ever learns the nameplate.
+    let server_url = signal_server_url.unwrap_or_else(|| DEFAULT_SIGNAL_URL.into());
+    let mut signaling = SignalingClient::allocate(&server_url)
+        .await
+        .map_err(|e| e.to_string())?;
+    signaling
+        .register("sender", Some(local_addr))
+        .await
+        .map_err(|e| e.to_string())?;
+    let nameplate = signaling
+        .wait_for_allocation()
+        .await
+        .map_err(|e| e.to_string())?;
+    let code = TransferCode::generate(nameplate);
+    let code_str = code.to_code_string();
+    // The full code is the SPAKE2 password: never write it to logs.
+    info!("send: allocated nameplate {nameplate}");
+
+    let session = TransferSession::new(TransferRole::Sender, code);
+    let session_id = session.id.clone();
+    let cancel_token = session.cancel_token.clone();
 
     let store = app.state::<SessionStore>().inner().clone();
     store
@@ -81,7 +95,6 @@ pub async fn start_send(
         }
     });
 
-    let server_url = signal_server_url.unwrap_or_else(|| DEFAULT_SIGNAL_URL.into());
     let code_clone = code_str.clone();
 
     // Run the send pipeline in background
@@ -94,8 +107,8 @@ pub async fn start_send(
         let result = tokio::select! {
             _ = cancel_wait.cancelled() => Err(crate::error::AppError::Cancelled),
             result = run_send_with_signaling(
-                input_paths, quic, local_addr, &code_clone,
-                &server_url, (cleanup_id.clone(), progress_tx.clone()), cancel_token,
+                input_paths, quic, &code_clone,
+                signaling, (cleanup_id.clone(), progress_tx.clone()), cancel_token,
             ) => result,
         };
 
@@ -138,9 +151,8 @@ enum RaceOutcome {
 async fn run_send_with_signaling(
     input_paths: Vec<PathBuf>,
     quic: QuicEndpoint,
-    local_addr: std::net::SocketAddr,
     code: &str,
-    server_url: &str,
+    mut signaling: SignalingClient,
     progress: (String, mpsc::UnboundedSender<ProgressEvent>),
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<(), crate::error::AppError> {
@@ -152,11 +164,7 @@ async fn run_send_with_signaling(
         })
         .ok();
 
-    // 1. Connect to signaling server
-    let mut signaling = SignalingClient::connect(server_url, code).await?;
-
-    // 2. Register as sender with our QUIC listen address
-    signaling.register("sender", Some(local_addr)).await?;
+    // 1-2. Already connected and registered by start_send (nameplate allocated).
 
     // 3. Wait for receiver to join
     let _peer_info = signaling.wait_for_peer().await?;

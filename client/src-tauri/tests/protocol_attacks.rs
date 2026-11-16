@@ -218,7 +218,7 @@ async fn key_confirmation_rejects_reflected_message() {
         }
     });
 
-    let mut client = SignalingClient::connect(&url, "7-guitar-palace")
+    let mut client = SignalingClient::connect(&url, "7-guitar-tiger")
         .await
         .unwrap();
     client.register("receiver", None).await.unwrap();
@@ -266,4 +266,57 @@ async fn oversized_unauthenticated_frame_is_refused() {
         "an 8 MiB unauthenticated frame was accepted"
     );
     assert!(relay_lib::protocol::messages::MAX_FRAME_BYTES < len as usize);
+}
+
+/// Nameplate/password split: the signaling server must learn only the
+/// leading number of the code, never the words that make up the SPAKE2
+/// password. Before the split the whole code was the WebSocket path.
+#[tokio::test]
+// The handshake callback's error type is fixed by tungstenite.
+#[allow(clippy::result_large_err)]
+async fn signaling_server_never_sees_the_password_words() {
+    use std::sync::{Arc, Mutex};
+    use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}", listener.local_addr().unwrap());
+    let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+    let seen_server = seen.clone();
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let record = seen_server.clone();
+        let mut ws =
+            tokio_tungstenite::accept_hdr_async(tcp, move |req: &Request, resp: Response| {
+                record.lock().unwrap().push(req.uri().to_string());
+                Ok(resp)
+            })
+            .await
+            .unwrap();
+        while let Some(Ok(msg)) = ws.next().await {
+            if let Message::Text(text) = msg {
+                seen_server.lock().unwrap().push(text.to_string());
+            }
+        }
+    });
+
+    let mut client = SignalingClient::connect(&url, "7-guitar-tiger")
+        .await
+        .unwrap();
+    client.register("receiver", None).await.unwrap();
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(300),
+        client.exchange_spake2(&[0u8; 33]),
+    )
+    .await;
+    drop(client);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), server).await;
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.first().map(String::as_str), Some("/ws/7"));
+    for item in seen.iter() {
+        assert!(
+            !item.contains("guitar") && !item.contains("tiger"),
+            "the server saw the password words: {item}"
+        );
+    }
 }

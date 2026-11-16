@@ -1,8 +1,10 @@
 // WebSocket signaling client for peer discovery and key exchange.
 //
 // Protocol:
-// 1. Connect to Go signaling server at /ws/{code}
-// 2. Send "register" with role + local peer info
+// 1. Sender connects to /ws and is allocated a nameplate; receiver connects to
+//    /ws/{nameplate}. Only the nameplate reaches the server: the words of the
+//    code are the SPAKE2 password and stay on the peers.
+// 2. Send "register" with role + local peer info (sender then reads "allocated")
 // 3. Wait for "peer_joined" with peer's network info
 // 4. Exchange SPAKE2 messages (forwarded by server)
 // 5. Key confirmation: exchange cert fingerprints sealed under the
@@ -26,6 +28,7 @@ use crate::crypto::aes_gcm::{ChunkDecryptor, ChunkEncryptor};
 use crate::crypto::session_keys::{Role, SessionKeys};
 use crate::error::{AppError, AppResult};
 use crate::protocol::version::{is_peer_protocol_compatible, CURRENT_PROTOCOL_VERSION};
+use crate::transfer::code::{parse_nameplate, TransferCode};
 
 /// Information about a peer's network addresses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,12 +78,24 @@ fn confirmation_aad(role: Role) -> Vec<u8> {
 }
 
 impl SignalingClient {
-    /// Connect to the signaling server for the given transfer code.
+    /// Join the room for an existing transfer code. Only the code's nameplate
+    /// is sent to the server; the password words never leave this process.
     pub async fn connect(server_url: &str, code: &str) -> AppResult<Self> {
-        // Normalize URL: strip trailing slash, build ws path
+        let room = TransferCode::parse(code)?.room();
+        Self::open(server_url, &format!("/ws/{room}")).await
+    }
+
+    /// Open a sender connection that asks the server to allocate a nameplate.
+    /// Follow with `register("sender", ..)` and `wait_for_allocation`.
+    pub async fn allocate(server_url: &str) -> AppResult<Self> {
+        Self::open(server_url, "/ws").await
+    }
+
+    async fn open(server_url: &str, path: &str) -> AppResult<Self> {
+        // Normalize URL: strip trailing slash
         let base = server_url.trim_end_matches('/');
-        let url = format!("{base}/ws/{code}");
-        info!("signaling: connecting to {base}/ws/<code>");
+        let url = format!("{base}{path}");
+        info!("signaling: connecting to {url}");
 
         // Bound what the server or a relayed peer can make us buffer before
         // anything is authenticated: one relay frame plus its length prefix.
@@ -129,6 +144,31 @@ impl SignalingClient {
         self.role = Some(parsed_role);
         info!("signaling: registered as {role}");
         Ok(())
+    }
+
+    /// After `allocate` and `register("sender", ..)`: the nameplate the server
+    /// allocated for this transfer.
+    pub async fn wait_for_allocation(&mut self) -> AppResult<u32> {
+        loop {
+            let msg = self.recv_json().await?;
+            match msg.msg_type.as_str() {
+                "allocated" => {
+                    let nameplate = msg
+                        .code
+                        .ok_or_else(|| AppError::WebSocket("allocated missing nameplate".into()))?;
+                    let nameplate = parse_nameplate(&nameplate)?;
+                    info!("signaling: allocated nameplate {nameplate}");
+                    return Ok(nameplate);
+                }
+                "error" => {
+                    let err_msg = msg.message.unwrap_or_else(|| "unknown error".into());
+                    return Err(AppError::WebSocket(format!("server error: {err_msg}")));
+                }
+                other => {
+                    debug!("signaling: ignoring '{other}' while waiting for allocation");
+                }
+            }
+        }
     }
 
     /// Wait for the peer to join. Returns the peer's network info.
