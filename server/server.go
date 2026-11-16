@@ -101,16 +101,20 @@ func (s *Server) RegisterPeer(code string, peer *Peer) (*Session, error) {
 }
 
 // RemoveSession deletes a session only if it is still the mapped identity.
+// maxNameplate is the largest nameplate handed out. It matches the client's
+// MAX_NAMEPLATE (transfer/code.rs); a var so tests can lower it.
+var maxNameplate = 99_999
+
 // AllocatePeer creates a session under the smallest unused nameplate ("1",
 // "2", ...) with peer as its sender. The loop is bounded: fewer than
-// maxSessions nameplates are taken.
+// maxSessions nameplates are taken, and it never passes maxNameplate.
 func (s *Server) AllocatePeer(peer *Peer) (string, *Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.sessions) >= s.maxSessions {
 		return "", nil, fmt.Errorf("max sessions reached (%d)", s.maxSessions)
 	}
-	for n := 1; ; n++ {
+	for n := 1; n <= maxNameplate; n++ {
 		code := strconv.Itoa(n)
 		if _, taken := s.sessions[code]; taken {
 			continue
@@ -127,6 +131,7 @@ func (s *Server) AllocatePeer(peer *Peer) (string, *Session, error) {
 		s.sessions[code] = sess
 		return code, sess, nil
 	}
+	return "", nil, fmt.Errorf("all %d nameplates are in use", maxNameplate)
 }
 
 func (s *Server) RemoveSession(code string, expected *Session) bool {

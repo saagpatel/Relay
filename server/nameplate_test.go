@@ -98,3 +98,29 @@ func TestAllocationRespectsMaxSessions(t *testing.T) {
 		t.Fatalf("expected error at capacity, got %q", msg.Type)
 	}
 }
+
+// Clients accept nameplates up to 99999; the server must never hand out a
+// larger one, whatever max-sessions is set to.
+func TestAllocationStopsAtNameplateCeiling(t *testing.T) {
+	old := maxNameplate
+	maxNameplate = 2
+	defer func() { maxNameplate = old }()
+
+	_, ts := newTestServer(t, 100, 10*time.Minute)
+	defer ts.Close()
+	base := "ws" + strings.TrimPrefix(ts.URL, "http")
+	a, _ := dialAllocate(t, base)
+	defer a.Close()
+	b, _ := dialAllocate(t, base)
+	defer b.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(base+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	register(conn, "sender")
+	if msg := readMsg(t, conn); msg.Type != "error" {
+		t.Fatalf("expected error past the ceiling, got %q (%q)", msg.Type, msg.Code)
+	}
+}
