@@ -1,0 +1,13 @@
+(* Sanity (non-vacuity): an honest run must be able to complete. Each query
+   asserts an event never happens; ProVerif must answer "false" (a trace
+   exists), or the authentication proofs in relay_v3.pv are vacuous. *)
+free pw: bitstring [private].
+
+query k: key, n: bitstring; event(SenderConfirmed(k)).
+query k: key, n: bitstring; event(ReceiverConfirmed(k)).
+query k: key, n: bitstring, m: bitstring; event(ReceiverStored(k, n, file_content, m)).
+query k: key, n: bitstring; event(SenderDelivered(k, n, file_content)).
+query k: key, n: bitstring, m: bitstring; event(ReceiverDone(k, n, file_content, m)).
+
+process
+  ( !Sender(pw) ) | ( !Receiver(pw) )

@@ -1,0 +1,95 @@
+-- Query event(ReceiverConfirmed(k_2)) ==> event(SenderKey(k_2)) in process 1.
+new y: exponent creating y_2 at {26} in copy a_1
+out(c, ~M) with ~M = blind(pw,exp(g,y_2)) at {28} in copy a_1
+in(c, a_2) at {29} in copy a_1
+event ReceiverKey(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2))) at {31} in copy a_1
+new fp_1: bitstring creating fp_3 at {32} in copy a_1
+new n_1: bitstring creating n_3 at {33} in copy a_1
+out(c, (~M_1,~M_2)) with ~M_1 = n_3, ~M_2 = aead(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2)),n_3,empty,fp_3) at {34} in copy a_1
+in(c, (~M_1,~M_2)) with ~M_1 = n_3, ~M_2 = aead(spake_key(pw,msgs(blind(pw,exp(g,y_2)),a_2),exp(unblind(pw,a_2),y_2)),n_3,empty,fp_3) at {35} in copy a_1
+event ReceiverConfirmed(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2))) at {37} in copy a_1 (goal)
+The event ReceiverConfirmed(spake_key(pw,msgs(blind(pw,exp(g,y_2)),a_2),exp(unblind(pw,a_2),y_2))) is executed at {37} in copy a_1.
+A trace has been found.
+RESULT event(ReceiverConfirmed(k_2)) ==> event(SenderKey(k_2)) is false.
+
+-- Query event(SenderConfirmed(k_2)) ==> event(ReceiverKey(k_2)) in process 1.
+new x: exponent creating x_3 at {3} in copy a
+out(c, ~M) with ~M = blind(pw,exp(g,x_3)) at {5} in copy a
+new x: exponent creating x_4 at {3} in copy a_1
+out(c, ~M_1) with ~M_1 = blind(pw,exp(g,x_4)) at {5} in copy a_1
+in(c, ~M_1) with ~M_1 = blind(pw,exp(g,x_4)) at {6} in copy a
+event SenderKey(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3))) at {8} in copy a
+new fp: bitstring creating fp_3 at {9} in copy a
+new n: bitstring creating n_3 at {10} in copy a
+out(c, (~M_2,~M_3)) with ~M_2 = n_3, ~M_3 = aead(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3)),n_3,empty,fp_3) at {11} in copy a
+in(c, (~M_2,~M_3)) with ~M_2 = n_3, ~M_3 = aead(spake_key(pw,msgs(blind(pw,exp(g,x_4)),blind(pw,exp(g,x_3))),exp(exp(g,x_4),x_3)),n_3,empty,fp_3) at {12} in copy a
+event SenderConfirmed(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3))) at {14} in copy a (goal)
+The event SenderConfirmed(spake_key(pw,msgs(blind(pw,exp(g,x_4)),blind(pw,exp(g,x_3))),exp(exp(g,x_4),x_3))) is executed at {14} in copy a.
+A trace has been found.
+RESULT event(SenderConfirmed(k_2)) ==> event(ReceiverKey(k_2)) is false.
+
+-- Query event(ReceiverStored(k_2,n_2,d,m)) ==> event(SenderOffered(k_2,n_2,d)) in process 1.
+new y: exponent creating y_2 at {26} in copy a_1
+out(c, ~M) with ~M = blind(pw,exp(g,y_2)) at {28} in copy a_1
+in(c, a_2) at {29} in copy a_1
+event ReceiverKey(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2))) at {31} in copy a_1
+new fp_1: bitstring creating fp_3 at {32} in copy a_1
+new n_1: bitstring creating n_4 at {33} in copy a_1
+out(c, (~M_1,~M_2)) with ~M_1 = n_4, ~M_2 = aead(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2)),n_4,empty,fp_3) at {34} in copy a_1
+in(c, (~M_1,~M_2)) with ~M_1 = n_4, ~M_2 = aead(spake_key(pw,msgs(blind(pw,exp(g,y_2)),a_2),exp(unblind(pw,a_2),y_2)),n_4,empty,fp_3) at {35} in copy a_1
+event ReceiverConfirmed(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2))) at {37} in copy a_1
+in(c, a_3) at {38} in copy a_1
+in(c, FileOffer(a_4,zero)) at {39} in copy a_1
+out(c, FileAccept) at {40} in copy a_1
+in(c, FileComplete(f0,sha(empty))) at {42} in copy a_1
+event ReceiverStored(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2)),a_4,empty,a_3) at {44} in copy a_1 (goal)
+The event ReceiverStored(spake_key(pw,msgs(blind(pw,exp(g,y_2)),a_2),exp(unblind(pw,a_2),y_2)),a_4,empty,a_3) is executed at {44} in copy a_1.
+A trace has been found.
+RESULT event(ReceiverStored(k_2,n_2,d,m)) ==> event(SenderOffered(k_2,n_2,d)) is false.
+
+-- Query event(SenderDelivered(k_2,n_2,d)) ==> event(ReceiverStored(k_2,n_2,d,m)) in process 1.
+new x: exponent creating x_3 at {3} in copy a
+out(c, ~M) with ~M = blind(pw,exp(g,x_3)) at {5} in copy a
+new x: exponent creating x_4 at {3} in copy a_1
+out(c, ~M_1) with ~M_1 = blind(pw,exp(g,x_4)) at {5} in copy a_1
+in(c, ~M_1) with ~M_1 = blind(pw,exp(g,x_4)) at {6} in copy a
+event SenderKey(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3))) at {8} in copy a
+new fp: bitstring creating fp_3 at {9} in copy a
+new n: bitstring creating n_3 at {10} in copy a
+out(c, (~M_2,~M_3)) with ~M_2 = n_3, ~M_3 = aead(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3)),n_3,empty,fp_3) at {11} in copy a
+in(c, (~M_2,~M_3)) with ~M_2 = n_3, ~M_3 = aead(spake_key(pw,msgs(blind(pw,exp(g,x_4)),blind(pw,exp(g,x_3))),exp(exp(g,x_4),x_3)),n_3,empty,fp_3) at {12} in copy a
+event SenderConfirmed(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3))) at {14} in copy a
+in(c, a_2) at {15} in copy a
+event SenderOffered(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3)),file_name,file_content) at {16} in copy a
+out(c, FileOffer(~M_4,~M_5)) with ~M_4 = file_name, ~M_5 = size(file_content) at {17} in copy a
+in(c, FileAccept) at {18} in copy a
+out(c, FileChunk(~M_6,~M_7,~M_8,~M_9)) with ~M_6 = f0, ~M_7 = c0, ~M_8 = aead(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3)),chunk_nonce(f0,c0),chunk_aad(f0,c0),file_content), ~M_9 = chunk_nonce(f0,c0) at {19} in copy a
+out(c, FileComplete(~M_10,~M_11)) with ~M_10 = f0, ~M_11 = sha(file_content) at {20} in copy a
+in(c, FileVerified(f0)) at {21} in copy a
+event SenderDelivered(spake_key(pw,msgs(blind(pw,exp(g,x_3)),blind(pw,exp(g,x_4))),exp(unblind(pw,blind(pw,exp(g,x_4))),x_3)),file_name,file_content) at {22} in copy a (goal)
+The event SenderDelivered(spake_key(pw,msgs(blind(pw,exp(g,x_4)),blind(pw,exp(g,x_3))),exp(exp(g,x_4),x_3)),file_name,file_content) is executed at {22} in copy a.
+A trace has been found.
+RESULT event(SenderDelivered(k_2,n_2,d)) ==> event(ReceiverStored(k_2,n_2,d,m)) is false.
+
+-- Query inj-event(ReceiverDone(k_2,n_2,d,m)) ==> inj-event(SenderOffered(k_2,n_2,d)) in process 1.
+new y: exponent creating y_2 at {26} in copy a_1
+out(c, ~M) with ~M = blind(pw,exp(g,y_2)) at {28} in copy a_1
+in(c, a_2) at {29} in copy a_1
+event ReceiverKey(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2))) at {31} in copy a_1
+new fp_1: bitstring creating fp_3 at {32} in copy a_1
+new n_1: bitstring creating n_4 at {33} in copy a_1
+out(c, (~M_1,~M_2)) with ~M_1 = n_4, ~M_2 = aead(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2)),n_4,empty,fp_3) at {34} in copy a_1
+in(c, (~M_1,~M_2)) with ~M_1 = n_4, ~M_2 = aead(spake_key(pw,msgs(blind(pw,exp(g,y_2)),a_2),exp(unblind(pw,a_2),y_2)),n_4,empty,fp_3) at {35} in copy a_1
+event ReceiverConfirmed(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2))) at {37} in copy a_1
+in(c, a_3) at {38} in copy a_1
+in(c, FileOffer(a_4,zero)) at {39} in copy a_1
+out(c, FileAccept) at {40} in copy a_1
+in(c, FileComplete(f0,sha(empty))) at {42} in copy a_1
+event ReceiverStored(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2)),a_4,empty,a_3) at {44} in copy a_1
+out(c, FileVerified(~M_3)) with ~M_3 = f0 at {45} in copy a_1
+in(c, TransferComplete) at {46} in copy a_1
+event ReceiverDone(spake_key(pw,msgs(a_2,blind(pw,exp(g,y_2))),exp(unblind(pw,a_2),y_2)),a_4,empty,a_3) at {47} in copy a_1 (goal)
+The event ReceiverDone(spake_key(pw,msgs(blind(pw,exp(g,y_2)),a_2),exp(unblind(pw,a_2),y_2)),a_4,empty,a_3) is executed at {47} in copy a_1.
+A trace has been found.
+RESULT inj-event(ReceiverDone(k_2,n_2,d,m)) ==> inj-event(SenderOffered(k_2,n_2,d)) is false.
+

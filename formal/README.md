@@ -7,7 +7,11 @@ over both transports (direct QUIC and the relay fallback).
 - `relay_v3.pvl`: protocol 3.0.0, the fix in this change.
 - `relay_vN.pv`, `relay_vN_fs.pv`, `relay_vN_server.pv`: query files (main
   properties, forward secrecy, malicious server).
-- `results/`: full ProVerif output for each file, including attack traces.
+- `relay_vN_reach.pv`: sanity queries showing that an honest run reaches
+  confirmation, storage, delivery and completion, so the correspondence
+  proofs are not vacuous.
+- `results/summary.txt`: every verdict from `run.sh`;
+  `results/v2_attack_traces.txt`: the 2.0.0 counterexample traces.
 
 Run (ProVerif 2.05, installed with `brew install opam expat gtk+ pkgconf`,
 `opam init`, `opam install proverif`):
@@ -17,7 +21,14 @@ PATH="$HOME/.opam/default/bin:$PATH" formal/run.sh
 ```
 
 `run.sh` exits non-zero if any 3.0.0 property other than the documented
-malicious-server case is not proved.
+malicious-server case is not proved, or if any sanity query fails to find an
+honest run.
+
+An earlier revision had `if sz = zero then ... else ...` without parentheses.
+ProVerif binds a bare `else` to the innermost `if`, which made the
+nonempty-file branch unreachable, so the 3.0.0 transfer proofs held
+vacuously. The Codex review on the PR caught it. Both branches are now
+parenthesized, and the `_reach.pv` queries guard against a repeat.
 
 ## Why ProVerif
 
@@ -81,7 +92,7 @@ which exposes timing and sizes to the relay; that is documented.
 
 ## The counterexamples and why they are real
 
-Full traces are in `results/relay_v2.pv.out`.
+Traces are in `results/v2_attack_traces.txt`.
 
 1. **Reflected key confirmation (P3a, P3b).** Needs the ability to inject into
    the victim's signaling stream (see Attacker above), so in practice a code

@@ -145,7 +145,8 @@ let Receiver(pw: bitstring) =
   in(c, f_off: bitstring);
   let FileOffer(name: bitstring, sz: bitstring) = aead_open(krecv, seq0, frame_ad, f_off) in
   out(c, aead(ksend, seq0, frame_ad, FileAccept));
-  if sz = zero then
+  (* parenthesized: a bare else would bind to the innermost if *)
+  if sz = zero then (
     in(c, f_cmp: bitstring);
     let FileComplete(=f0, h: bitstring) = aead_open(krecv, seq1, frame_ad, f_cmp) in
     if h = sha(empty) then
@@ -154,7 +155,7 @@ let Receiver(pw: bitstring) =
     in(c, f_end: bitstring);
     if aead_open(krecv, seq2, frame_ad, f_end) = TransferComplete then
     event ReceiverDone(k, name, empty, mode)
-  else
+  ) else (
     in(c, f_chk: bitstring);
     let FileChunk(=f0, =c0, ct: bitstring, nonce: bitstring) = aead_open(krecv, seq1, frame_ad, f_chk) in
     if nonce = chunk_nonce(f0, c0) then
@@ -167,4 +168,5 @@ let Receiver(pw: bitstring) =
     out(c, aead(ksend, seq1, frame_ad, FileVerified(f0)));
     in(c, f_end: bitstring);
     if aead_open(krecv, seq3, frame_ad, f_end) = TransferComplete then
-    event ReceiverDone(k, name, data, mode).
+    event ReceiverDone(k, name, data, mode)
+  ).

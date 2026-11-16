@@ -1,0 +1,37 @@
+== relay_v2.pv
+  RESULT not attacker(file_content[]) is true.
+  RESULT Weak secret pw is true.
+  RESULT event(ReceiverConfirmed(k_2)) ==> event(SenderKey(k_2)) is false.
+  RESULT event(SenderConfirmed(k_2)) ==> event(ReceiverKey(k_2)) is false.
+  RESULT event(ReceiverStored(k_2,n_2,d,m)) ==> event(SenderOffered(k_2,n_2,d)) is false.
+  RESULT event(SenderDelivered(k_2,n_2,d)) ==> event(ReceiverStored(k_2,n_2,d,m)) is false.
+  RESULT inj-event(ReceiverDone(k_2,n_2,d,m)) ==> inj-event(SenderOffered(k_2,n_2,d)) is false.
+  RESULT (even event(ReceiverDone(k_2,n_2,d,m)) ==> event(SenderOffered(k_2,n_2,d)) is false.)
+== relay_v2_fs.pv
+  RESULT not attacker_p1(file_content[]) is true.
+== relay_v2_server.pv
+  RESULT not attacker(file_content[]) is false.
+== relay_v2_reach.pv
+  RESULT not event(SenderConfirmed(k_2)) is false.
+  RESULT not event(ReceiverConfirmed(k_2)) is false.
+  RESULT not event(ReceiverStored(k_2,n_2,file_content[],m)) is false.
+  RESULT not event(SenderDelivered(k_2,n_2,file_content[])) is false.
+  RESULT not event(ReceiverDone(k_2,n_2,file_content[],m)) is false.
+== relay_v3.pv
+  RESULT not attacker(file_content[]) is true.
+  RESULT Weak secret pw is true.
+  RESULT event(ReceiverConfirmed(k_2)) ==> event(SenderKey(k_2)) is true.
+  RESULT event(SenderConfirmed(k_2)) ==> event(ReceiverKey(k_2)) is true.
+  RESULT event(ReceiverStored(k_2,n_2,d,m)) ==> event(SenderOffered(k_2,n_2,d)) is true.
+  RESULT event(SenderDelivered(k_2,n_2,d)) ==> event(ReceiverStored(k_2,n_2,d,m)) is true.
+  RESULT inj-event(ReceiverDone(k_2,n_2,d,m)) ==> inj-event(SenderOffered(k_2,n_2,d)) is true.
+== relay_v3_fs.pv
+  RESULT not attacker_p1(file_content[]) is true.
+== relay_v3_server.pv
+  RESULT not attacker(file_content[]) is false.
+== relay_v3_reach.pv
+  RESULT not event(SenderConfirmed(k_2)) is false.
+  RESULT not event(ReceiverConfirmed(k_2)) is false.
+  RESULT not event(ReceiverStored(k_2,n_2,file_content[],m)) is false.
+  RESULT not event(SenderDelivered(k_2,n_2,file_content[])) is false.
+  RESULT not event(ReceiverDone(k_2,n_2,file_content[],m)) is false.

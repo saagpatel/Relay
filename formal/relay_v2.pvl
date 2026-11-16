@@ -118,7 +118,8 @@ let Receiver(pw: bitstring) =
   in(c, mode: bitstring);
   in(c, FileOffer(name: bitstring, sz: bitstring));
   out(c, FileAccept);
-  if sz = zero then
+  (* parenthesized: a bare else would bind to the innermost if *)
+  if sz = zero then (
     (* zero-length file: no FileChunk arrives; receiver.rs creates the
        reassembler on FileComplete and verifies sha256(empty) against size 0 *)
     in(c, FileComplete(=f0, h: bitstring));
@@ -127,7 +128,7 @@ let Receiver(pw: bitstring) =
     out(c, FileVerified(f0));
     in(c, =TransferComplete);
     event ReceiverDone(k, name, empty, mode)
-  else
+  ) else (
     in(c, FileChunk(=f0, =c0, ct: bitstring, nonce: bitstring));
     if nonce = chunk_nonce(f0, c0) then                 (* decrypt_chunk nonce check *)
     let data = aead_open(k, nonce, chunk_aad(f0, c0), ct) in
@@ -137,4 +138,5 @@ let Receiver(pw: bitstring) =
     event ReceiverStored(k, name, data, mode);
     out(c, FileVerified(f0));
     in(c, =TransferComplete);
-    event ReceiverDone(k, name, data, mode).
+    event ReceiverDone(k, name, data, mode)
+  ).
