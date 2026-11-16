@@ -129,7 +129,10 @@ All three regression tests failed on `f43d036` and pass after the fix.
   direction and role. A reflected message no longer opens.
 - `network/secure.rs`: every `PeerMessage` is sealed with AES-256-GCM under its
   direction key, nonce = per-direction counter. Forged, replayed, reordered,
-  reflected or spliced frames fail to open and abort the transfer. The relay
+  reflected or spliced frames fail to open and abort the transfer. A
+  withheld suffix (for example the final `TransferComplete`) is not
+  detected as an error; the receiver simply never completes. The model's
+  properties are safety properties and say nothing about liveness. The relay
   and the QUIC path now carry only ciphertext, so file names and checksums are
   no longer visible to the relay.
 - `protocol/version.rs`: version 3.0.0; clients refuse 2.x peers and 2.x
