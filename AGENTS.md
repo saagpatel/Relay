@@ -30,7 +30,7 @@ Relay is a desktop peer-to-peer file transfer app. It uses QUIC for direct trans
 
 - Preserve end-to-end file encryption, folder structure, and multi-file transfer behavior.
 - Do not claim that QUIC peer certificates are verified: clients currently accept unverified self-signed certificates.
-- The transfer code is both the rendezvous identifier and SPAKE2 password; do not describe it as an independently authenticated identity.
+- The transfer code's leading number is the nameplate the server sees; the whole code is the SPAKE2 password, and its words must never reach the server or logs. Do not describe the code as an independently authenticated identity.
 - The default client signaling URL is `ws://localhost:8080`; do not imply a hosted default exists.
 - Keep receiver writes inside the chosen destination and preserve existing files on failed or cancelled transfers.
 - Keep changes scoped to the requested behavior and preserve unrelated work.

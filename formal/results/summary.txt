@@ -28,6 +28,11 @@
 == relay_v3_fs.pv
   RESULT not attacker_p1(file_content[]) is true.
 == relay_v3_server.pv
+  RESULT not attacker(file_content[]) is true.
+  RESULT Weak secret words is true.
+  RESULT event(ReceiverStored(k_2,n_2,d,m)) ==> event(SenderOffered(k_2,n_2,d)) is true.
+  RESULT event(SenderDelivered(k_2,n_2,d)) ==> event(ReceiverStored(k_2,n_2,d,m)) is true.
+== relay_v3_codeholder.pv
   RESULT not attacker(file_content[]) is false.
 == relay_v3_reach.pv
   RESULT not event(SenderConfirmed(k_2)) is false.

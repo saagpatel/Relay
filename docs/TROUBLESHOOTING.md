@@ -303,11 +303,11 @@ wireshark -i any -f "tcp port 8080"
 **Test signaling server manually**:
 ```bash
 # WebSocket client test
-websocat ws://localhost:8080/ws/42-test-code
+websocat ws://localhost:8080/ws/42
 # Send: {"type":"register","role":"sender"}
 ```
 
-The WebSocket path carries the transfer code. The default client signaling URL is `ws://localhost:8080`; the server route is `/ws/{code}`.
+The WebSocket path carries only the nameplate (the code's leading number). The default client signaling URL is `ws://localhost:8080`; senders use `/ws` and receivers `/ws/{nameplate}`.
 
 ## Receiver save directory
 
