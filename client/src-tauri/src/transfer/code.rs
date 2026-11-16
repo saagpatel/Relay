@@ -4,24 +4,31 @@ use crate::error::{AppError, AppResult};
 
 const WORDLIST: &str = include_str!("../../../wordlist.txt");
 
-/// A human-friendly transfer code: "{digit}-{word}-{word}"
+/// Largest nameplate a code may carry. The server allocates the smallest free
+/// number, so real nameplates stay short; this only bounds parsing.
+pub const MAX_NAMEPLATE: u32 = 99_999;
+
+/// A human-friendly transfer code: "{nameplate}-{word}-{word}".
+///
+/// The nameplate is the room number the signaling server allocated; it is
+/// the only part the server ever sees. The two words are generated locally
+/// and never leave the peers. The whole code string is the SPAKE2 password.
 #[derive(Debug, Clone)]
 pub struct TransferCode {
-    pub digit: u8,
+    pub nameplate: u32,
     pub word1: String,
     pub word2: String,
 }
 
 impl TransferCode {
-    /// Generate a random transfer code.
-    pub fn generate() -> Self {
+    /// Generate fresh password words for a nameplate the server allocated.
+    pub fn generate(nameplate: u32) -> Self {
         let mut rng = rand::rng();
         let words = wordlist();
-        let digit = rng.random_range(0..10u8);
         let word1 = words[rng.random_range(0..words.len())].to_string();
         let word2 = words[rng.random_range(0..words.len())].to_string();
         Self {
-            digit,
+            nameplate,
             word1,
             word2,
         }
@@ -29,7 +36,12 @@ impl TransferCode {
 
     /// Format as "7-guitar-palace"
     pub fn to_code_string(&self) -> String {
-        format!("{}-{}-{}", self.digit, self.word1, self.word2)
+        format!("{}-{}-{}", self.nameplate, self.word1, self.word2)
+    }
+
+    /// The room name to send to the signaling server: the nameplate alone.
+    pub fn room(&self) -> String {
+        self.nameplate.to_string()
     }
 
     /// Parse a code string like "7-guitar-palace"
@@ -37,17 +49,11 @@ impl TransferCode {
         let parts: Vec<&str> = code.trim().splitn(3, '-').collect();
         if parts.len() != 3 {
             return Err(AppError::InvalidCode(
-                "expected format: digit-word-word".into(),
+                "expected format: number-word-word".into(),
             ));
         }
 
-        let digit: u8 = parts[0]
-            .parse()
-            .map_err(|_| AppError::InvalidCode("first part must be a digit 0-9".into()))?;
-
-        if digit > 9 {
-            return Err(AppError::InvalidCode("digit must be 0-9".into()));
-        }
+        let nameplate = parse_nameplate(parts[0])?;
 
         let words = wordlist();
         let word1 = parts[1].to_lowercase();
@@ -61,11 +67,24 @@ impl TransferCode {
         }
 
         Ok(Self {
-            digit,
+            nameplate,
             word1,
             word2,
         })
     }
+}
+
+/// Parse a nameplate: 1 to 5 ASCII digits, value 1..=MAX_NAMEPLATE.
+pub fn parse_nameplate(value: &str) -> AppResult<u32> {
+    let invalid = || AppError::InvalidCode(format!("nameplate must be a number 1-{MAX_NAMEPLATE}"));
+    if value.is_empty() || value.len() > 5 || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    let nameplate: u32 = value.parse().map_err(|_| invalid())?;
+    if nameplate == 0 || nameplate > MAX_NAMEPLATE {
+        return Err(invalid());
+    }
+    Ok(nameplate)
 }
 
 impl std::fmt::Display for TransferCode {
@@ -103,11 +122,11 @@ mod tests {
 
     #[test]
     fn test_generate_and_parse_roundtrip() {
-        for _ in 0..50 {
-            let code = TransferCode::generate();
+        for n in 1..50 {
+            let code = TransferCode::generate(n * 37);
             let s = code.to_code_string();
             let parsed = TransferCode::parse(&s).unwrap();
-            assert_eq!(parsed.digit, code.digit);
+            assert_eq!(parsed.nameplate, code.nameplate);
             assert_eq!(parsed.word1, code.word1);
             assert_eq!(parsed.word2, code.word2);
         }
@@ -118,6 +137,16 @@ mod tests {
         assert!(TransferCode::parse("invalid").is_err());
         assert!(TransferCode::parse("abc-guitar-palace").is_err());
         assert!(TransferCode::parse("7-notaword-palace").is_err());
-        assert!(TransferCode::parse("10-guitar-palace").is_err());
+        assert!(TransferCode::parse("0-guitar-palace").is_err());
+        assert!(TransferCode::parse("100000-guitar-palace").is_err());
+        assert!(TransferCode::parse("+7-guitar-palace").is_err());
+    }
+
+    #[test]
+    fn room_is_the_nameplate_alone() {
+        let code = TransferCode::parse("42-guitar-tiger").unwrap();
+        assert_eq!(code.room(), "42");
+        assert!(!code.room().contains("guitar"));
+        assert_eq!(code.to_code_string(), "42-guitar-tiger");
     }
 }

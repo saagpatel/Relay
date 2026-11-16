@@ -97,7 +97,7 @@ mod tests {
             id.clone(),
             Arc::new(TransferSession::new(
                 TransferRole::Sender,
-                TransferCode::generate(),
+                TransferCode::generate(1),
             )),
         );
         accepts.lock().await.insert(id.clone(), accept_tx);

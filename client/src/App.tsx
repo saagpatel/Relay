@@ -110,8 +110,8 @@ export default function App() {
           try {
             const clipboardText = await navigator.clipboard.readText();
             if (clipboardText) {
-              // Check if it matches transfer code format (digit-word-word)
-              const codePattern = /^\d{1,2}-[a-z]+-[a-z]+$/i;
+              // Check if it matches transfer code format (number-word-word)
+              const codePattern = /^[1-9]\d{0,4}-[a-z]+-[a-z]+$/i;
               if (codePattern.test(clipboardText.trim())) {
                 setTransfer("phase", "entering-code");
                 setTransfer("role", "receiver");

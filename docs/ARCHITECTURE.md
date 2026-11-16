@@ -10,7 +10,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 │  (Tauri + Rust)  │                    │  (Tauri + Rust)  │
 └────────┬─────────┘                    └─────────┬────────┘
          │                                        │
-         │  1. Register (code)                    │
+         │  1. Allocate / join nameplate          │
          ├───────────────────┐   ┌───────────────┤
          │                   ▼   ▼                │
          │          ┌─────────────────┐           │
@@ -71,7 +71,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 #### Transfer Module
 - `transfer/sender.rs` — Sender pipeline: offer → chunks → verify
 - `transfer/receiver.rs` — Receiver pipeline: accept → chunks → verify
-- `transfer/code.rs` — Human-friendly code generation (digit-word-word)
+- `transfer/code.rs` — Transfer codes: server-allocated nameplate plus two local words (`4-guitar-tiger`)
 - `transfer/session.rs` — Session state machine (WaitingForPeer → Exchanging → Connecting → Transferring → Completed)
 - `transfer/progress.rs` — Real-time speed/ETA tracking (3-second sliding window)
 
@@ -102,7 +102,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 
 1. **Code Generation** (Sender)
    - User selects files → `start_send` command
-   - Generate transfer code (e.g., `42-elephant-zebra`)
+   - Ask the server for a nameplate (`/ws`), then pick two words locally (e.g., `42-guitar-tiger`)
    - Register with signaling server as "sender"
    - Listen on QUIC port
 
@@ -113,7 +113,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 
 3. **Key Exchange** (Both)
    - Exchange SPAKE2 messages via signaling server
-   - Derive a shared key from the transfer code, which is both the rendezvous ID and password
+   - Derive a shared key from the whole code as the SPAKE2 password; the server saw only the nameplate
    - Split the shared secret with HKDF into per-direction keys and a chunk key
    - Key confirmation: exchange QUIC certificate fingerprints sealed with each side's direction key and role; peers still do not verify the certificates
 
@@ -140,8 +140,8 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 ## Security Model
 
 ### Threat Model
-- **Users trust each other**: Share the transfer code only with the intended peer. It is both the rendezvous identifier and the SPAKE2 password.
-- **Signaling server**: An honest, forwarding server sees peer IPs, the transfer code, timing and frame sizes, but only sealed peer frames. Because it knows the code, a malicious server can impersonate either peer.
+- **Users trust each other**: Share the transfer code only with the intended peer. Its nameplate is the public room number; the whole code is the SPAKE2 password.
+- **Signaling server**: Sees peer IPs, nameplates, timing and frame sizes, and only sealed peer frames. It never learns a code's words, so even a malicious server can only guess them online, one attempt per session.
 - **Peer identity**: QUIC peer certificates are self-signed and not verified. Against an attacker without the code, the sealed peer channel and key confirmation provide mutual authentication from the code; see `formal/README.md`.
 
 ### Encryption Layers
@@ -166,7 +166,7 @@ Relay is a peer-to-peer file transfer application with automatic connection fall
 - **Code Validation**: Enforces digit-word-word format
 - **Offer Limits**: File count and metadata size are bounded
 - **Message Length**: peers refuse frames above 4 MiB before authenticating them, and the server refuses peer messages above one frame
-- **Signaling route**: WebSocket connections use `/ws/{code}`; the default client URL is `ws://localhost:8080`
+- **Signaling route**: senders use `/ws` (nameplate allocation), receivers `/ws/{nameplate}`; the default client URL is `ws://localhost:8080`
 - **Destination default**: When no save directory is configured, the UI uses `/tmp/relay-received`
 
 ## Performance Characteristics

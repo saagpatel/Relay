@@ -23,7 +23,8 @@ Branch `fix/relay-protocol-proof` (renamed from the session default to satisfy
       independent RFC 5869 implementation.
 - [x] Nightly sweep: causes found and fixed (below).
 - [x] Independent model-vs-code review (fresh subagent): no divergence that breaks a 3.0.0 proof; 7 README corrections applied; 2 real issues outside the model fixed (256 MiB pre-auth frames, code in client logs).
-- [ ] PR through `agent-pr-merge --billing-blocked`.
+- [x] PR saagpatel/Relay#113 merged (`55ca380`).
+- [x] Nameplate/password split (branch `feat/nameplate-split`): server allocates nameplates, words stay local; P8 now proved. Relay #2 queued on the shape (2 words, server-allocated).
 
 ## Nightly sweep, red since at least Nov 1
 
@@ -49,9 +50,4 @@ Branch `fix/relay-protocol-proof` (renamed from the session default to satisfy
 - Not done: pinning the QUIC certificate to the confirmed fingerprint. The
   sealed channel makes it unnecessary for integrity; it would add
   transport-level authentication.
-- The code is still in the signaling URL, so the server (and any `ws://`
-  observer) knows the password. Hashing the code would not help (about
-  655,000 values, brute-forced at once). The fix is magic-wormhole's split:
-  send only the leading part (the digit, or a longer nameplate) to the server
-  and keep the words as the SPAKE2 password. That changes the room model and
-  the code format, so it is a design change for Saagar.
+- Done in the follow-up: the nameplate/password split.

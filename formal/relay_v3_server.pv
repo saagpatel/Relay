@@ -1,8 +1,21 @@
-(* P8 malicious signaling server or ws:// observer (3.0.0): the code is in the
-   URL path /ws/{code}, so this attacker knows the SPAKE2 password from the start.
-   Documented in docs/SECURITY.md; expected to fail. *)
-free pw: bitstring [private].
+(* P8 (3.0.0 with the nameplate split): the signaling server, any ws://
+   observer and anyone reading server logs learn the nameplate (the room
+   number in /ws/{nameplate}) but not the words. The full code string is the
+   SPAKE2 password (signaling.rs connect, spake.rs KeyExchange::new), so the
+   password is a public nameplate joined with secret words. *)
+free nameplate: bitstring.
+free words: bitstring [private].
+fun mkcode(bitstring, bitstring): bitstring [data].
+
 query attacker(file_content).
+(* the words cannot be tested offline even knowing the nameplate *)
+weaksecret words.
+query k: key, n: bitstring, d: bitstring, m: bitstring;
+  event(ReceiverStored(k, n, d, m)) ==> event(SenderOffered(k, n, d)).
+query k: key, n: bitstring, d: bitstring, m: bitstring;
+  event(SenderDelivered(k, n, d)) ==> event(ReceiverStored(k, n, d, m)).
 
 process
-  ( out(c, pw) | ( !Sender(pw) ) | ( !Receiver(pw) ) )
+  ( out(c, nameplate)
+  | ( !Sender(mkcode(nameplate, words)) )
+  | ( !Receiver(mkcode(nameplate, words)) ) )

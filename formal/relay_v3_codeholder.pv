@@ -1,0 +1,8 @@
+(* P8b (3.0.0): someone who was told the whole code (the intended receiver,
+   or anyone it was shared with) knows the SPAKE2 password and can take the
+   receiver's place. Inherent to a code-based PAKE; expected to fail. *)
+free pw: bitstring [private].
+query attacker(file_content).
+
+process
+  ( out(c, pw) | ( !Sender(pw) ) | ( !Receiver(pw) ) )

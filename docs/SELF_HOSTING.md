@@ -12,7 +12,7 @@ go build -o relay-server .
 ./relay-server
 ```
 
-The server listens on `:8080` by default. Its WebSocket route is `/ws/{code}` and its health endpoint is `GET /health`.
+The server listens on `:8080` by default. Senders connect to `/ws` and are allocated a nameplate; receivers join `/ws/{nameplate}`. The health endpoint is `GET /health`.
 
 ## Configuration
 
@@ -49,6 +49,6 @@ The response reports server health and the current active-session count.
 
 - Sessions are held in memory and are not shared across server instances.
 - Configure the client URL with `wss://` when the reverse proxy provides TLS.
-- The signaling server forwards peer signaling and relayed ciphertext. It can see participant network addresses, transfer codes, timing and frame sizes. Peer messages, including file names and checksums, are sealed end to end, but a server that knows the code could impersonate a peer, so run your own server if that matters.
+- The signaling server forwards peer signaling and relayed ciphertext. It can see participant network addresses, nameplates, timing and frame sizes. It never receives the words of a code, which are the secret part of the SPAKE2 password, and peer messages, including file names and checksums, are sealed end to end.
 - Server and clients speak protocol 3.0.0 and refuse 2.x. Upgrade the server and every client together.
 - Choose session and relay limits for the capacity of the host. The defaults are configuration values, not a capacity guarantee.

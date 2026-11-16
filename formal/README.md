@@ -7,6 +7,8 @@ over both transports (direct QUIC and the relay fallback).
 - `relay_v3.pvl`: protocol 3.0.0, the fix in this change.
 - `relay_vN.pv`, `relay_vN_fs.pv`, `relay_vN_server.pv`: query files (main
   properties, forward secrecy, malicious server).
+- `relay_v3_codeholder.pv`: someone told the whole code (inherent; expected
+  to fail).
 - `relay_vN_reach.pv`: sanity queries showing that an honest run reaches
   confirmation, storage, delivery and completion, so the correspondence
   proofs are not vacuous.
@@ -20,8 +22,8 @@ Run (ProVerif 2.05, installed with `brew install opam expat gtk+ pkgconf`,
 PATH="$HOME/.opam/default/bin:$PATH" formal/run.sh
 ```
 
-`run.sh` exits non-zero if any 3.0.0 property other than the documented
-malicious-server case is not proved, or if any sanity query fails to find an
+`run.sh` exits non-zero if any 3.0.0 property (including the malicious-server
+case, since the nameplate split) is not proved, or if any sanity query fails to find an
 honest run.
 
 An earlier revision had `if sz = zero then ... else ...` without parentheses.
@@ -34,7 +36,7 @@ parenthesized, and the `_reach.pv` queries guard against a repeat.
 
 ProVerif proves properties for an unbounded number of sessions automatically,
 has a native `weaksecret` query for offline guessing of a low-entropy password
-(the transfer code has about 655,000 values), and handles the
+(the secret words of a code have 65,536 values), and handles the
 ideal-cipher abstraction of a PAKE that its own EKE example uses. Tamarin has
 better Diffie-Hellman support but no built-in offline-guessing query, and its
 proofs here would need hand-written lemmas. Every Relay question in scope is a
@@ -47,11 +49,19 @@ relay WebSocket. That is faithful to the code: the server forwards `spake2` and
 `cert_fingerprint` frames to whoever is in the room (`server/handler.go:260`),
 QUIC certificates are never verified (`network/quic.rs:92`, `quic.rs:136`), and
 the relay forwards binary frames verbatim (`server/relay.go`). The transfer
-code is not given to the attacker, except in `*_server.pv`: the code is the
-WebSocket path `/ws/{code}` (`network/signaling.rs:79`), so the signaling server,
-and anyone on a `ws://` path, knows the SPAKE2 password. So does anyone who can
-read the server's logs, which include the code (`server/handler.go`,
-`server/server.go`); before this change the client logs included it too.
+code is not given to the attacker. The server cases differ by version:
+
+- 2.0.0 (`relay_v2_server.pv`): the whole code was the WebSocket path
+  `/ws/{code}`, so the signaling server, anyone on a `ws://` path and anyone
+  reading server logs knew the SPAKE2 password. The model gives the attacker
+  `pw`.
+- 3.0.0 with the nameplate split (`relay_v3_server.pv`): the sender is
+  allocated a nameplate on `/ws`, the receiver joins `/ws/{nameplate}`
+  (`network/signaling.rs connect`, `allocate`; `server/handler.go`), and the
+  words never leave the peers. The password is the whole code, modeled as
+  `mkcode(nameplate, words)` with the nameplate given to the attacker.
+- `relay_v3_codeholder.pv`: an attacker told the whole code. That breaks any
+  code-based PAKE and is expected to fail.
 
 The single channel makes the attacker stronger than reality on signaling: the
 real server admits one sender and one receiver per room and forwards
@@ -72,7 +82,8 @@ unverified and the sender accepts the first QUIC connection that arrives.
 | P5 | A sender that sees `FileVerified` talked to a receiver that stored exactly that file | `transfer/sender.rs` FileVerified handling | **attack** | proved |
 | P6 | Replay: each completed receive matches a distinct sender session (injective) | chunk nonce/AAD design, `crypto/aes_gcm.rs` | **attack** | proved |
 | P7 | Forward secrecy: leaking the code after the sessions keeps earlier contents secret | ephemeral SPAKE2 scalars | proved | proved |
-| P8 | Contents secret even from the signaling server | not claimed: `docs/SECURITY.md` says the code is the rendezvous ID and password | attack (documented) | attack (documented) |
+| P8 | Contents secret, transfers authentic and words not guessable offline, against the signaling server (it knows the nameplate) | nameplate split, `docs/SECURITY.md` | attack (server knew the whole code) | proved |
+| P8b | Same against someone told the whole code | inherent to a PAKE | attack | attack (inherent) |
 | P9 | No downgrade through the relay fallback | `network/transport.rs` | holds | holds |
 
 Note on P1 for 2.0.0: the model treats file contents as an unguessable value.
@@ -146,6 +157,22 @@ All three regression tests failed on `f43d036` and pass after the fix.
   WebSocket config in `network/signaling.rs`), and the server refuses peer
   messages over one frame (`server/handler.go`). The client no longer logs
   the transfer code.
+
+## The nameplate/password split
+
+- `server/handler.go`, `server/server.go AllocatePeer`: a sender connecting to
+  `/ws` gets the smallest free nameplate (`allocated` message); a receiver may
+  not allocate.
+- `transfer/code.rs`: `TransferCode { nameplate, word1, word2 }`; `room()` is
+  the nameplate alone. Words come from `generate(nameplate)` on the sender.
+- `network/signaling.rs`: `connect(url, code)` parses the code and sends only
+  `/ws/{nameplate}`; `allocate(url)` plus `wait_for_allocation()` for senders.
+- Regression tests: `tests/protocol_attacks.rs::
+  signaling_server_never_sees_the_password_words` (failed before: the server
+  saw `/ws/7-guitar-tiger`), and `server/nameplate_test.go`.
+- Online guessing remains: anyone can join a nameplate as the receiver and
+  try one pair of words (1 in 65,536). Key confirmation then fails and both
+  peers report it. ProVerif's `weaksecret` covers offline guessing only.
 
 ## Abstractions (where the model is coarser than the code)
 

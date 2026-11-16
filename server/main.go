@@ -32,11 +32,7 @@ func main() {
 	defer stop()
 	go srv.CleanupLoopContext(ctx, 60*time.Second)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", srv.HealthHandler)
-	// Transitional compatibility path used by existing perf probes and legacy integrations.
-	mux.HandleFunc("GET /api/health", srv.HealthHandler)
-	mux.HandleFunc("GET /ws/{code}", srv.WebSocketHandler)
+	mux := newMux(srv)
 
 	log.Printf("Relay signaling server starting on %s (max-sessions=%d, session-ttl=%s, relay-rate-limit=%d B/s)",
 		*addr, *maxSessions, *sessionTTL, *relayRateLimit)
@@ -54,4 +50,17 @@ func main() {
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server failed: %v", err)
 	}
+}
+
+// newMux wires the HTTP routes; tests use the same routes as the binary.
+func newMux(srv *Server) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", srv.HealthHandler)
+	// Transitional compatibility path used by existing perf probes and legacy integrations.
+	mux.HandleFunc("GET /api/health", srv.HealthHandler)
+	// A sender connects to /ws and is allocated a nameplate; a receiver joins
+	// /ws/{nameplate}. The words of the transfer code never reach the server.
+	mux.HandleFunc("GET /ws", srv.WebSocketHandler)
+	mux.HandleFunc("GET /ws/{code}", srv.WebSocketHandler)
+	return mux
 }

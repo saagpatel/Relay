@@ -1,6 +1,6 @@
 # Relay
 
-Relay is a desktop file transfer app. It tries a direct QUIC connection first and uses a WebSocket relay when direct connectivity is unavailable. File contents and transfer metadata are encrypted and authenticated end to end; the signaling server sees peer addresses, the transfer code, timing and frame sizes.
+Relay is a desktop file transfer app. It tries a direct QUIC connection first and uses a WebSocket relay when direct connectivity is unavailable. File contents and transfer metadata are encrypted and authenticated end to end; the signaling server sees peer addresses, the code's room number, timing and frame sizes, but never the code's words.
 
 ## Quick Start
 
@@ -30,9 +30,9 @@ The client uses `ws://localhost:8080` as its default signaling URL. Run a local 
 
 ## How It Works
 
-1. The sender creates a transfer code and registers with the signaling server.
-2. The receiver enters the code and registers with the same server.
-3. The peers use the code as the SPAKE2 password to derive a shared key.
+1. The sender asks the signaling server for a room number (the nameplate) and picks two words locally, forming a code like `4-guitar-tiger`.
+2. The receiver enters the code; only the nameplate `4` is sent to the server.
+3. The peers use the whole code as the SPAKE2 password to derive a shared key.
 4. They try direct QUIC first and use the signaling server's WebSocket relay if needed.
 5. The receiver verifies each completed file using SHA-256.
 
@@ -49,8 +49,8 @@ The client uses `ws://localhost:8080` as its default signaling URL. Run a local 
 
 ### Known risks
 
-- QUIC peer certificates are not verified. The transfer code is both the rendezvous identifier and the shared password.
-- A forwarding signaling server cannot read file contents or names, but it observes peer IP addresses, the transfer code, timing and frame sizes. It knows the code, so a malicious server could impersonate a peer.
+- QUIC peer certificates are not verified. Peer authentication rests on the transfer code.
+- The signaling server cannot read file contents or names and never learns the code's words, so it cannot impersonate a peer except by guessing the words online (1 in 65,536 per attempt, and a wrong guess fails key confirmation visibly). It observes peer IP addresses, the nameplate, timing and frame sizes.
 - Direct QUIC, relay fallback, multi-file transfers, and destination safety need continued coverage as transport and receiver code changes.
 
 ### Next steps

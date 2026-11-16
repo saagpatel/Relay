@@ -125,13 +125,17 @@ async fn test_signaling_spake2_exchange() {
         find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
-    let code = TransferCode::generate().to_code_string();
+    // The sender gets its nameplate from the server and hands the full code
+    // to the receiver, as a person reading it out would.
+    let (code_tx, code_rx) = oneshot::channel::<String>();
 
     let ws_url = server.ws_url().to_string();
-    let code_s = code.clone();
     let sender_task = tokio::spawn(async move {
-        let mut client = SignalingClient::connect(&ws_url, &code_s).await.unwrap();
+        let mut client = SignalingClient::allocate(&ws_url).await.unwrap();
         client.register("sender", None).await.unwrap();
+        let nameplate = client.wait_for_allocation().await.unwrap();
+        let code_s = TransferCode::generate(nameplate).to_code_string();
+        code_tx.send(code_s.clone()).unwrap();
         let _peer = client.wait_for_peer().await.unwrap();
 
         let kx = KeyExchange::new(&code_s);
@@ -145,7 +149,7 @@ async fn test_signaling_spake2_exchange() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let ws_url = server.ws_url().to_string();
-    let code_r = code.clone();
+    let code_r = code_rx.await.unwrap();
     let receiver_task = tokio::spawn(async move {
         let mut client = SignalingClient::connect(&ws_url, &code_r).await.unwrap();
         client.register("receiver", None).await.unwrap();
@@ -223,7 +227,9 @@ async fn test_full_file_transfer() {
         find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
-    let code = TransferCode::generate().to_code_string();
+    // The sender gets its nameplate from the server and hands the full code
+    // to the receiver, as a person reading it out would.
+    let (code_tx, code_rx) = oneshot::channel::<String>();
 
     let temp_dir = tempfile::tempdir().unwrap();
     let send_file = temp_dir.path().join("test-file.txt");
@@ -234,7 +240,6 @@ async fn test_full_file_transfer() {
     let ws_url = server.ws_url().to_string();
 
     // Sender
-    let code_s = code.clone();
     let ws_url_s = ws_url.clone();
     let send_file_clone = send_file.clone();
     let sender_handle = tokio::spawn(async move {
@@ -242,11 +247,14 @@ async fn test_full_file_transfer() {
         let local_addr = quic.local_addr().unwrap();
         let register_addr: SocketAddr = format!("127.0.0.1:{}", local_addr.port()).parse().unwrap();
 
-        let mut signaling = SignalingClient::connect(&ws_url_s, &code_s).await.unwrap();
+        let mut signaling = SignalingClient::allocate(&ws_url_s).await.unwrap();
         signaling
             .register("sender", Some(register_addr))
             .await
             .unwrap();
+        let nameplate = signaling.wait_for_allocation().await.unwrap();
+        let code_s = TransferCode::generate(nameplate).to_code_string();
+        code_tx.send(code_s.clone()).unwrap();
         let _peer = signaling.wait_for_peer().await.unwrap();
 
         let kx = KeyExchange::new(&code_s);
@@ -293,7 +301,7 @@ async fn test_full_file_transfer() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Receiver
-    let code_r = code.clone();
+    let code_r = code_rx.await.unwrap();
     let ws_url_r = ws_url.clone();
     let recv_path = recv_dir.path().to_path_buf();
     let receiver_handle = tokio::spawn(async move {
@@ -365,7 +373,9 @@ async fn test_relay_transport_transfer() {
         find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
-    let code = TransferCode::generate().to_code_string();
+    // The sender gets its nameplate from the server and hands the full code
+    // to the receiver, as a person reading it out would.
+    let (code_tx, code_rx) = oneshot::channel::<String>();
 
     let temp_dir = tempfile::tempdir().unwrap();
     let send_file = temp_dir.path().join("relay-test.txt");
@@ -377,12 +387,14 @@ async fn test_relay_transport_transfer() {
     let ws_url = server.ws_url().to_string();
 
     // Sender: connect via signaling, then request relay directly (skip QUIC)
-    let code_s = code.clone();
     let ws_url_s = ws_url.clone();
     let send_file_clone = send_file.clone();
     let sender_handle = tokio::spawn(async move {
-        let mut signaling = SignalingClient::connect(&ws_url_s, &code_s).await.unwrap();
+        let mut signaling = SignalingClient::allocate(&ws_url_s).await.unwrap();
         signaling.register("sender", None).await.unwrap();
+        let nameplate = signaling.wait_for_allocation().await.unwrap();
+        let code_s = TransferCode::generate(nameplate).to_code_string();
+        code_tx.send(code_s.clone()).unwrap();
         let _peer = signaling.wait_for_peer().await.unwrap();
 
         let kx = KeyExchange::new(&code_s);
@@ -426,7 +438,7 @@ async fn test_relay_transport_transfer() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Receiver: same — connect, request relay
-    let code_r = code.clone();
+    let code_r = code_rx.await.unwrap();
     let ws_url_r = ws_url.clone();
     let recv_path = recv_dir.path().to_path_buf();
     let receiver_handle = tokio::spawn(async move {
@@ -493,7 +505,9 @@ async fn test_folder_transfer() {
         find_server_binary().expect("Go signaling server binary could not be built or found");
 
     let server = TestServer::start(&binary);
-    let code = TransferCode::generate().to_code_string();
+    // The sender gets its nameplate from the server and hands the full code
+    // to the receiver, as a person reading it out would.
+    let (code_tx, code_rx) = oneshot::channel::<String>();
 
     // Create a nested temp directory to send
     let send_dir = tempfile::tempdir().unwrap();
@@ -532,7 +546,6 @@ async fn test_folder_transfer() {
     assert_eq!(files.len(), 3, "should have 3 files (not .DS_Store)");
 
     // Sender
-    let code_s = code.clone();
     let ws_url_s = ws_url.clone();
     let files_s = files.clone();
     let infos_s = file_infos.clone();
@@ -541,11 +554,14 @@ async fn test_folder_transfer() {
         let local_addr = quic.local_addr().unwrap();
         let register_addr: SocketAddr = format!("127.0.0.1:{}", local_addr.port()).parse().unwrap();
 
-        let mut signaling = SignalingClient::connect(&ws_url_s, &code_s).await.unwrap();
+        let mut signaling = SignalingClient::allocate(&ws_url_s).await.unwrap();
         signaling
             .register("sender", Some(register_addr))
             .await
             .unwrap();
+        let nameplate = signaling.wait_for_allocation().await.unwrap();
+        let code_s = TransferCode::generate(nameplate).to_code_string();
+        code_tx.send(code_s.clone()).unwrap();
         let _peer = signaling.wait_for_peer().await.unwrap();
 
         let kx = KeyExchange::new(&code_s);
@@ -584,7 +600,7 @@ async fn test_folder_transfer() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Receiver
-    let code_r = code.clone();
+    let code_r = code_rx.await.unwrap();
     let ws_url_r = ws_url.clone();
     let recv_path = recv_dir.path().to_path_buf();
     let receiver_handle = tokio::spawn(async move {

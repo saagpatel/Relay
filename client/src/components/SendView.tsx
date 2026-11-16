@@ -1,13 +1,20 @@
-import { Show } from "solid-js";
+import { Show, createSignal } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { transfer, setTransfer, resetTransfer } from "../stores/transfer";
 import { settings } from "../stores/settings";
 import { startSend } from "../lib/tauri-bridge";
 import { cancelTransfer } from "../lib/tauri-bridge";
+import { useStartGuard } from "../lib/start-guard.mjs";
 import CodeDisplay from "./CodeDisplay";
 import FileList from "./FileList";
 
 export default function SendView() {
+  // start_send allocates a nameplate before it returns, so a start can be in
+  // flight when the user clicks again or goes Back.
+  // Invalidated on unmount too, so Escape or Settings mid-start is safe.
+  const guard = useStartGuard();
+  const [starting, setStarting] = createSignal(false);
+
   async function selectFiles() {
     const selected = await open({
       multiple: true,
@@ -32,19 +39,36 @@ export default function SendView() {
 
   async function handleSend() {
     if (transfer.selectedFiles.length === 0) return;
+    const token = guard.begin();
+    if (token === null) return;
+    setStarting(true);
     try {
       const result = await startSend(
         transfer.selectedFiles,
         settings.signalServerUrl || undefined
       );
+      if (!guard.isCurrent(token)) {
+        // The user left or restarted while the nameplate was being allocated.
+        await cancelTransfer(result.session_id).catch(() => undefined);
+        return;
+      }
       setTransfer("code", result.code);
       setTransfer("sessionId", result.session_id);
       setTransfer("senderPort", result.port);
       setTransfer("phase", "waiting");
     } catch (e) {
+      if (!guard.isCurrent(token)) return;
       setTransfer("phase", "error");
       setTransfer("error", String(e));
+    } finally {
+      guard.end(token);
+      if (guard.isCurrent(token)) setStarting(false);
     }
+  }
+
+  function abandonStart() {
+    guard.invalidate();
+    setStarting(false);
   }
 
   return (
@@ -83,16 +107,18 @@ export default function SendView() {
               }))}
             />
             <button
-              class="w-full py-3 bg-[#3b82f6] hover:bg-[#2563eb] rounded-lg font-semibold transition-colors"
+              class="w-full py-3 bg-[#3b82f6] hover:bg-[#2563eb] disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors"
               onClick={handleSend}
+              disabled={starting()}
             >
-              Start Sending
+              {starting() ? "Starting..." : "Start Sending"}
             </button>
           </Show>
 
           <button
             class="text-sm text-[#a0a0a0] hover:text-white transition-colors"
             onClick={async () => {
+              abandonStart();
               if (transfer.sessionId) await cancelTransfer(transfer.sessionId).catch(() => undefined);
               resetTransfer();
             }}
@@ -116,7 +142,12 @@ export default function SendView() {
           </Show>
           <button
             class="text-sm text-[#a0a0a0] hover:text-white transition-colors"
-            onClick={resetTransfer}
+            onClick={async () => {
+              abandonStart();
+              // Release the session (and its nameplate) on the backend too.
+              if (transfer.sessionId) await cancelTransfer(transfer.sessionId).catch(() => undefined);
+              resetTransfer();
+            }}
           >
             Cancel
           </button>
