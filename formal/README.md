@@ -47,7 +47,8 @@ secrecy or correspondence query, which is ProVerif's home ground.
 Dolev-Yao on one channel that carries signaling, the direct QUIC stream and the
 relay WebSocket. That is faithful to the code: the server forwards `spake2` and
 `cert_fingerprint` frames to whoever is in the room (`server/handler.go:260`),
-QUIC certificates are never verified (`network/quic.rs:92`, `quic.rs:136`), and
+in 2.0.0 QUIC certificates were never verified (and the model keeps QUIC on
+the attacker's channel even now that they are pinned), and
 the relay forwards binary frames verbatim (`server/relay.go`). The transfer
 code is not given to the attacker. The server cases differ by version:
 
@@ -67,8 +68,11 @@ The single channel makes the attacker stronger than reality on signaling: the
 real server admits one sender and one receiver per room and forwards
 `spake2`/`cert_fingerprint` only to the other peer, so injecting into a
 victim's signaling stream needs the code, a broken `wss`, or the server
-itself. On the direct QUIC path no such restriction exists: certificates are
-unverified and the sender accepts the first QUIC connection that arrives.
+itself. On the direct QUIC path, before certificate pinning,
+certificates were unverified and the sender
+accepted the first QUIC connection that arrived. Both sides now pin the
+other's certificate to the confirmed fingerprint; the model still treats
+QUIC as attacker-controlled, which is conservative.
 
 ## Properties and results
 
@@ -202,9 +206,11 @@ All three regression tests failed on `f43d036` and pass after the fix.
   reality (any QUIC client sees the certificate). Known plaintext does not
   matter under an ideal AEAD, and both sides discard the peer's fingerprint.
 - MessagePack decoding is modeled as free constructors (no parsing confusion).
-- The QUIC certificate fingerprint is exchanged but still not used to verify
-  the certificate; the model reflects that by putting QUIC on the attacker's
-  channel.
+- QUIC certificates are now pinned in both directions to the confirmed
+  fingerprints (`network/quic.rs`), but the model still puts QUIC on the
+  attacker's channel. The proved properties therefore do not depend on
+  pinning; pinning adds transport-level authentication and stops a stranger
+  from occupying the sender's QUIC listener.
 
 ## SPAKE2 test vectors
 
