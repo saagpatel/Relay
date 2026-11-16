@@ -21,12 +21,14 @@ type SignalMessage struct {
 	ProtocolVersion string          `json:"protocol_version,omitempty"`
 }
 
-const signalingProtocolVersion = "2.0.0"
+const signalingProtocolVersion = "3.0.0"
 
 const (
 	writeTimeout         = 10 * time.Second
 	maxRegistrationBytes = 64 * 1024
-	maxRelayFrameBytes   = 256 * 1024 * 1024
+	// One relay frame: the client's MAX_FRAME_BYTES (4 MiB) plus its 4-byte
+	// length prefix. Messages are buffered whole, so this bounds per-peer memory.
+	maxRelayFrameBytes = 4*1024*1024 + 4
 )
 
 var registrationReadTimeout = 10 * time.Second

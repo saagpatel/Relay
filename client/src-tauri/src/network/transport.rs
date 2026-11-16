@@ -5,7 +5,6 @@
 
 use crate::error::{AppError, AppResult};
 use crate::network::relay::RelayStream;
-use crate::protocol::messages::PeerMessage;
 
 use quinn::{RecvStream, SendStream};
 
@@ -18,21 +17,22 @@ pub enum Transport {
 }
 
 impl Transport {
-    /// Send a PeerMessage to the remote peer.
-    pub async fn send_peer_message(&mut self, msg: &PeerMessage) -> AppResult<()> {
+    /// Send one sealed frame. Callers go through `network::secure::SecureChannel`;
+    /// nothing is ever sent unauthenticated.
+    pub(crate) async fn send_frame(&mut self, frame: Vec<u8>) -> AppResult<()> {
         match self {
             Transport::Direct { send, .. } => {
-                crate::protocol::messages::write_message(send, msg).await
+                crate::protocol::messages::write_frame(send, &frame).await
             }
-            Transport::Relayed { ws } => ws.send_message(msg).await,
+            Transport::Relayed { ws } => ws.send_frame(frame).await,
         }
     }
 
-    /// Receive a PeerMessage from the remote peer.
-    pub async fn recv_peer_message(&mut self) -> AppResult<PeerMessage> {
+    /// Receive one sealed frame.
+    pub(crate) async fn recv_frame(&mut self) -> AppResult<Vec<u8>> {
         match self {
-            Transport::Direct { recv, .. } => crate::protocol::messages::read_message(recv).await,
-            Transport::Relayed { ws } => ws.recv_message().await,
+            Transport::Direct { recv, .. } => crate::protocol::messages::read_frame(recv).await,
+            Transport::Relayed { ws } => ws.recv_frame().await,
         }
     }
 

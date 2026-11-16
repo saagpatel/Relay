@@ -51,7 +51,8 @@ pub async fn start_send(
 
     let code = TransferCode::generate();
     let code_str = code.to_code_string();
-    info!("send: generated code '{code_str}'");
+    // The code is the SPAKE2 password: never write it to logs.
+    info!("send: generated transfer code");
 
     let session = TransferSession::new(TransferRole::Sender, code);
     let session_id = session.id.clone();

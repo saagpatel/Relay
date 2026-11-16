@@ -50,9 +50,15 @@ pub struct FileInfo {
     pub relative_path: Option<String>,
 }
 
-/// Read one length-prefixed MessagePack message from a QUIC receive stream.
-pub async fn read_message(stream: &mut RecvStream) -> AppResult<PeerMessage> {
-    // Read 4-byte length prefix (big-endian u32)
+/// Largest frame either peer accepts. Frames are buffered before they are
+/// authenticated, so this bounds what an unauthenticated party can make a peer
+/// allocate. The largest honest frames are a sealed 256 KiB chunk and an offer
+/// whose names and paths are capped at 1 MiB (sender.rs / receiver.rs), both
+/// well under 4 MiB.
+pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
+
+/// Read one length-prefixed frame (a sealed PeerMessage) from a QUIC stream.
+pub async fn read_frame(stream: &mut RecvStream) -> AppResult<Vec<u8>> {
     let mut len_buf = [0u8; 4];
     stream
         .read_exact(&mut len_buf)
@@ -60,42 +66,32 @@ pub async fn read_message(stream: &mut RecvStream) -> AppResult<PeerMessage> {
         .map_err(|e| AppError::Network(format!("failed to read message length: {e}")))?;
 
     let len = u32::from_be_bytes(len_buf) as usize;
-
-    // Sanity check: max message size 256MB (generous for large chunks)
-    if len > 256 * 1024 * 1024 {
+    if len > MAX_FRAME_BYTES {
         return Err(AppError::Transfer(format!(
             "message too large: {len} bytes"
         )));
     }
 
-    // Read the payload
     let mut payload = vec![0u8; len];
     stream
         .read_exact(&mut payload)
         .await
         .map_err(|e| AppError::Network(format!("failed to read message payload: {e}")))?;
-
-    // Deserialize
-    rmp_serde::from_slice(&payload)
-        .map_err(|e| AppError::Serialization(format!("failed to decode message: {e}")))
+    Ok(payload)
 }
 
-/// Write one length-prefixed MessagePack message to a QUIC send stream.
-pub async fn write_message(stream: &mut SendStream, msg: &PeerMessage) -> AppResult<()> {
-    let payload =
-        rmp_serde::to_vec(msg).map_err(|e| AppError::Serialization(format!("encode: {e}")))?;
-
-    let len = payload.len() as u32;
+/// Write one length-prefixed frame to a QUIC stream.
+pub async fn write_frame(stream: &mut SendStream, frame: &[u8]) -> AppResult<()> {
+    let len =
+        u32::try_from(frame.len()).map_err(|_| AppError::Transfer("frame too large".into()))?;
     stream
         .write_all(&len.to_be_bytes())
         .await
         .map_err(|e| AppError::Network(format!("failed to write message length: {e}")))?;
-
     stream
-        .write_all(&payload)
+        .write_all(frame)
         .await
         .map_err(|e| AppError::Network(format!("failed to write message payload: {e}")))?;
-
     Ok(())
 }
 
@@ -107,7 +103,7 @@ mod tests {
     fn test_serialize_deserialize_all_variants() {
         let messages = vec![
             PeerMessage::FileOffer {
-                protocol_version: Some("2.0.0".into()),
+                protocol_version: Some("3.0.0".into()),
                 files: vec![FileInfo {
                     name: "test.txt".into(),
                     size: 1024,

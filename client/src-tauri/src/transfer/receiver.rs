@@ -7,7 +7,9 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::{info, warn};
 
 use crate::crypto::aes_gcm::ChunkDecryptor;
+use crate::crypto::session_keys::Role;
 use crate::error::{AppError, AppResult};
+use crate::network::secure::SecureChannel;
 use crate::network::transport::Transport;
 use crate::protocol::messages::PeerMessage;
 use crate::protocol::reassembler::FileReassembler;
@@ -17,6 +19,7 @@ use crate::protocol::version::{
 use crate::transfer::progress::{FileOfferInfo, ProgressEvent, ProgressTracker};
 
 /// Run the receiver pipeline over an established transport (QUIC or relay).
+/// `encryption_key` is the raw SPAKE2 output; directional keys are derived here.
 pub async fn run_receive(
     session_id: String,
     save_dir: PathBuf,
@@ -27,6 +30,10 @@ pub async fn run_receive(
     cancel: tokio_util::sync::CancellationToken,
 ) -> AppResult<()> {
     info!("receiver: waiting for file offer");
+    // Frames from the sender open only under the sender->receiver key, in order;
+    // anything forged, replayed or reflected aborts the transfer (protocol 3.0.0).
+    let (mut channel, keys) =
+        SecureChannel::from_shared(transport, &encryption_key, Role::Receiver)?;
     progress_tx
         .send(ProgressEvent::StateChanged {
             session_id: session_id.clone(),
@@ -35,7 +42,7 @@ pub async fn run_receive(
         .ok();
 
     // Receive file offer
-    let offer = transport.recv_peer_message().await?;
+    let offer = channel.recv().await?;
     let files = match offer {
         PeerMessage::FileOffer {
             protocol_version,
@@ -80,15 +87,11 @@ pub async fn run_receive(
     };
 
     if !accepted {
-        transport
-            .send_peer_message(&PeerMessage::FileDecline)
-            .await?;
+        channel.send(&PeerMessage::FileDecline).await?;
         return Err(AppError::Cancelled);
     }
 
-    transport
-        .send_peer_message(&PeerMessage::FileAccept)
-        .await?;
+    channel.send(&PeerMessage::FileAccept).await?;
     progress_tx
         .send(ProgressEvent::StateChanged {
             session_id: session_id.clone(),
@@ -107,9 +110,9 @@ pub async fn run_receive(
     // Receive chunks until TransferComplete
     loop {
         let msg = tokio::select! {
-            result = transport.recv_peer_message() => result?,
+            result = channel.recv() => result?,
             _ = cancel.cancelled() => {
-                transport.send_peer_message(&PeerMessage::Cancel {
+                channel.send(&PeerMessage::Cancel {
                     reason: "cancelled by receiver".into(),
                 }).await.ok();
                 drop(reassemblers);
@@ -142,11 +145,8 @@ pub async fn run_receive(
                 }
                 if reassemblers[idx].is_none() {
                     reassemblers[idx] = Some(
-                        FileReassembler::new(
-                            &destinations[idx],
-                            ChunkDecryptor::new(&encryption_key)?,
-                        )
-                        .await?,
+                        FileReassembler::new(&destinations[idx], ChunkDecryptor::new(&keys.chunk)?)
+                            .await?,
                     );
                 }
                 let reassembler = reassemblers[idx]
@@ -184,11 +184,8 @@ pub async fn run_receive(
                 }
                 if slot.is_none() {
                     *slot = Some(
-                        FileReassembler::new(
-                            &destinations[idx],
-                            ChunkDecryptor::new(&encryption_key)?,
-                        )
-                        .await?,
+                        FileReassembler::new(&destinations[idx], ChunkDecryptor::new(&keys.chunk)?)
+                            .await?,
                     );
                 }
                 let reassembler = slot
@@ -198,8 +195,8 @@ pub async fn run_receive(
                 verified[idx] = true;
                 info!("receiver: file '{}' verified", files[idx].name);
 
-                transport
-                    .send_peer_message(&PeerMessage::FileVerified { file_index })
+                channel
+                    .send(&PeerMessage::FileVerified { file_index })
                     .await?;
 
                 progress_tx
