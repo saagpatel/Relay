@@ -19,8 +19,8 @@ check:
 	cargo fmt --manifest-path client/src-tauri/Cargo.toml --all -- --check
 	cargo clippy --manifest-path client/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 	cargo test --manifest-path client/src-tauri/Cargo.toml --locked -- --test-threads=1
-	node --conditions=browser --test client/src/lib/phase-transition.test.mjs client/src/lib/start-guard.test.mjs
 	cd client && pnpm install --frozen-lockfile
+	node --conditions=browser --test client/src/lib/phase-transition.test.mjs client/src/lib/start-guard.test.mjs
 	cd client && pnpm typecheck
 	cd client && pnpm build
 
