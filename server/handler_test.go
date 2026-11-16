@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -15,11 +14,7 @@ import (
 func newTestServer(t *testing.T, maxSessions int, ttl time.Duration) (*Server, *httptest.Server) {
 	t.Helper()
 	srv := NewServer(maxSessions, ttl, 10*1024*1024)
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ws/{code}", srv.WebSocketHandler)
-	mux.HandleFunc("GET /health", srv.HealthHandler)
-	mux.HandleFunc("GET /api/health", srv.HealthHandler)
-	ts := httptest.NewServer(mux)
+	ts := httptest.NewServer(newMux(srv))
 	return srv, ts
 }
 

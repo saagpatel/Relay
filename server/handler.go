@@ -49,11 +49,9 @@ var upgrader = websocket.Upgrader{
 
 // WebSocketHandler handles the /ws/{code} endpoint.
 func (s *Server) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
+	// Empty code: the /ws route, where a sender asks for a fresh nameplate.
 	code := r.PathValue("code")
-	if code == "" {
-		http.Error(w, "missing session code", http.StatusBadRequest)
-		return
-	}
+	allocate := code == ""
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -84,11 +82,36 @@ func (s *Server) WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		Done: make(chan struct{}),
 	}
 
-	sess, err := s.RegisterPeer(code, peer)
-	if err != nil {
-		sendErrorConn(conn, "CODE_IN_USE", err.Error())
-		conn.Close()
-		return
+	var sess *Session
+	if allocate {
+		if peer.Role != "sender" {
+			sendErrorConn(conn, "INVALID_MESSAGE", "only a sender can request a nameplate; receivers join /ws/{nameplate}")
+			conn.Close()
+			return
+		}
+		code, sess, err = s.AllocatePeer(peer)
+		if err != nil {
+			sendErrorConn(conn, "NO_CAPACITY", err.Error())
+			conn.Close()
+			return
+		}
+		if err := peer.WriteJSON(SignalMessage{
+			Type:            "allocated",
+			Code:            code,
+			ProtocolVersion: signalingProtocolVersion,
+		}); err != nil {
+			log.Printf("allocated write error on session %s: %v", code, err)
+			s.RemoveSession(code, sess)
+			conn.Close()
+			return
+		}
+	} else {
+		sess, err = s.RegisterPeer(code, peer)
+		if err != nil {
+			sendErrorConn(conn, "CODE_IN_USE", err.Error())
+			conn.Close()
+			return
+		}
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 	conn.SetReadLimit(maxRelayFrameBytes)
