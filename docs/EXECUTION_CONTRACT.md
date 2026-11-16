@@ -33,7 +33,6 @@ Any completion claim must be backed by a successful run of the verification cont
   - `docs/RELEASE_GATES.md`
   - `docs/EXECUTION_CONTRACT.md`
   - `docs/LOCAL_SMOKE.md`
-  - `docs/release/*` governance artifacts
 
 ## Protocol compatibility policy
 

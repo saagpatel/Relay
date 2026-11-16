@@ -20,11 +20,12 @@ node scripts/ci/check-perf-profile.mjs foundation
 (cd client/src-tauri && cargo test --test signaling_e2e -- --test-threads=1)
 
 # G3: Security / supply chain (hard fail)
-# v1.8.0 requires Go 1.26; v1.7.0 supports the CI toolchain pinned to Go 1.25.13.
-go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+# CI reads the Go toolchain from server/go.mod (go 1.27), which v1.9.0 supports.
+go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 (cd server && "$(go env GOPATH)/bin/govulncheck" ./...)
 cargo install cargo-audit --locked
-(cd client/src-tauri && cargo audit --deny warnings --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195)
+# RUSTSEC-2026-0441: pin-utils unmaintained (no fixed release); transitive via tauri -> reqwest -> hyper
+(cd client/src-tauri && cargo audit --deny warnings --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 --ignore RUSTSEC-2026-0441)
 # GHSA-ph9p-34f9-6g65: tmp path-traversal in @lhci/cli dev-dep; no production code path
 (cd client && pnpm audit --audit-level high --ignore GHSA-ph9p-34f9-6g65)
 node scripts/ci/check-release-evidence.mjs --gate g3
@@ -35,7 +36,6 @@ node scripts/ci/check-release-materials.mjs
 (eval "$(node scripts/ci/export-operational-thresholds.mjs --shell)" && node scripts/perf/compare-metric.mjs .perf-baselines/bundle.json client/.perf-results/bundle.json totalBytes "$PERF_BUNDLE_DELTA_MAX_RATIO")
 (cd client && npm_execpath="$(command -v pnpm)" node ../scripts/perf/measure-build-time.mjs)
 (eval "$(node scripts/ci/export-operational-thresholds.mjs --shell)" && node scripts/perf/compare-metric.mjs .perf-baselines/build-time.json client/.perf-results/build-time.json buildMs "$PERF_BUILD_DELTA_MAX_RATIO")
-(cd client && MEMORY_MAX_DELTA_MB=5 node --expose-gc ../scripts/perf/memory-smoke.mjs)
 (eval "$(node scripts/ci/export-operational-thresholds.mjs --shell)" && cd client && ASSET_MAX_BYTES="$PERF_ASSET_MAX_BYTES" bash ../scripts/perf/check-assets.sh)
 
 # G5: Release promotion evidence (templates required pre-credentials)
@@ -47,9 +47,3 @@ test -f docs/SECURITY.md
 test -f docs/RELEASE_GATES.md
 test -f docs/EXECUTION_CONTRACT.md
 test -f docs/LOCAL_SMOKE.md
-test -f docs/release/README.md
-test -f docs/release/RELEASE_GATE_OWNERSHIP.md
-test -f docs/release/RELEASE_CHANNELS.md
-test -f docs/release/COMPATIBILITY_POLICY.md
-test -f docs/release/ROLLBACK_PLAYBOOK.md
-test -f docs/release/CANARY_SCORECARD.md

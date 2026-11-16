@@ -9,14 +9,9 @@ const gate = gateFlagIndex >= 0 ? process.argv[gateFlagIndex + 1] : "all";
 const eventName = process.env.GITHUB_EVENT_NAME || "";
 const shouldEnforce = enforce || eventName === "release";
 
-const requiredDocs = [
-  "docs/release/README.md",
-  "docs/release/RELEASE_GATE_OWNERSHIP.md",
-  "docs/release/RELEASE_CHANNELS.md",
-  "docs/release/COMPATIBILITY_POLICY.md",
-  "docs/release/ROLLBACK_PLAYBOOK.md",
-  "docs/release/CANARY_SCORECARD.md",
-];
+// The docs/release/ governance templates were removed on 2026-10-12; only the
+// evidence templates under .codex/evidence remain required.
+const requiredDocs = [];
 
 const requiredTemplates = [
   ".codex/evidence/README.md",
@@ -63,7 +58,7 @@ for (const template of requiredTemplates) {
 }
 
 if (!shouldEnforce) {
-  console.log(`release evidence templates and governance docs are present (gate=${gate})`);
+  console.log(`release evidence templates are present (gate=${gate})`);
   process.exit(0);
 }
 
