@@ -1,0 +1,31 @@
+(* Queries against the 2.0.0 model (relay_v2.pvl). Run: formal/run.sh *)
+
+free pw: bitstring [private].
+
+(* P1 confidentiality of file contents against a network attacker without the code *)
+query attacker(file_content).
+
+(* P2 offline guessing: the code cannot be tested offline after any number of sessions *)
+weaksecret pw.
+
+(* P3a/P3b explicit key confirmation: finishing the confirmation step implies
+   the other role derived the same key *)
+query k: key; event(ReceiverConfirmed(k)) ==> event(SenderKey(k)).
+query k: key; event(SenderConfirmed(k)) ==> event(ReceiverKey(k)).
+
+(* P4 receiver authenticity: whatever the receiver stores as verified (name and
+   contents, over either transport) was offered by a sender holding the same key *)
+query k: key, n: bitstring, d: bitstring, m: bitstring;
+  event(ReceiverStored(k, n, d, m)) ==> event(SenderOffered(k, n, d)).
+
+(* P5 sender delivery confirmation: a sender that sees FileVerified was talking
+   to a receiver that stored exactly that file *)
+query k: key, n: bitstring, d: bitstring, m: bitstring;
+  event(SenderDelivered(k, n, d)) ==> event(ReceiverStored(k, n, d, m)).
+
+(* P6 replay: each completed receive matches a distinct sender session *)
+query k: key, n: bitstring, d: bitstring, m: bitstring;
+  inj-event(ReceiverDone(k, n, d, m)) ==> inj-event(SenderOffered(k, n, d)).
+
+process
+  ( !Sender(pw) ) | ( !Receiver(pw) )

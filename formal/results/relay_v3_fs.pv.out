@@ -1,0 +1,200 @@
+File "relay_v3.pvl", line 163, characters 11-15:
+Warning: identifier f_cmp rebound.
+File "relay_v3.pvl", line 164, character 27:
+Warning: identifier h rebound.
+File "relay_v3.pvl", line 168, characters 11-15:
+Warning: identifier f_end rebound.
+Linear part:
+exp(exp(g,x),y) = exp(exp(g,y),x)
+msgs(a,b) = msgs(b,a)
+Completing equations...
+Completed equations:
+msgs(a,b) = msgs(b,a)
+exp(exp(g,x),y) = exp(exp(g,y),x)
+Convergent part:
+unblind(p,blind(p,e)) = e
+blind(p,unblind(p,m)) = m
+Completing equations...
+Completed equations:
+blind(p,unblind(p,m)) = m
+unblind(p,blind(p,e)) = e
+Process 0 (that is, the initial process):
+(
+    {1}!
+    {2}let pw_1: bitstring = pw in
+    {3}new x: exponent;
+    {4}let X: bitstring = blind(pw_1,exp(g,x)) in
+    {5}out(c, X);
+    {6}in(c, Y: bitstring);
+    {7}let k: key = spake_key(pw_1,msgs(X,Y),exp(unblind(pw_1,Y),x)) in
+    {8}event SenderKey(k);
+    {9}let ksend: key = hk(k,lbl_s2r) in
+    {10}let krecv: key = hk(k,lbl_r2s) in
+    {11}let kchunk: key = hk(k,lbl_chunk) in
+    {12}new fp: bitstring;
+    {13}new n: bitstring;
+    {14}out(c, (n,aead(ksend,n,conf_sender,fp)));
+    {15}in(c, (n2: bitstring,ct2: bitstring));
+    {16}let fp2: bitstring = aead_open(krecv,n2,conf_receiver,ct2) in
+    {17}event SenderConfirmed(k);
+    {18}in(c, mode: bitstring);
+    {19}event SenderOffered(k,file_name,file_content);
+    {20}out(c, aead(ksend,seq0,frame_ad,FileOffer(file_name,size(file_content))));
+    {21}in(c, f_acc: bitstring);
+    {22}if (aead_open(krecv,seq0,frame_ad,f_acc) = FileAccept) then
+    {23}out(c, aead(ksend,seq1,frame_ad,FileChunk(f0,c0,aead(kchunk,chunk_nonce(f0,c0),chunk_aad(f0,c0),file_content),chunk_nonce(f0,c0))));
+    {24}out(c, aead(ksend,seq2,frame_ad,FileComplete(f0,sha(file_content))));
+    {25}in(c, f_ver: bitstring);
+    {26}if (aead_open(krecv,seq1,frame_ad,f_ver) = FileVerified(f0)) then
+    {27}event SenderDelivered(k,file_name,file_content);
+    {28}out(c, aead(ksend,seq3,frame_ad,TransferComplete))
+) | (
+    {29}!
+    {30}let pw_2: bitstring = pw in
+    {31}new y: exponent;
+    {32}let Y_1: bitstring = blind(pw_2,exp(g,y)) in
+    {33}out(c, Y_1);
+    {34}in(c, X_1: bitstring);
+    {35}let k_1: key = spake_key(pw_2,msgs(X_1,Y_1),exp(unblind(pw_2,X_1),y)) in
+    {36}event ReceiverKey(k_1);
+    {37}let ksend_1: key = hk(k_1,lbl_r2s) in
+    {38}let krecv_1: key = hk(k_1,lbl_s2r) in
+    {39}let kchunk_1: key = hk(k_1,lbl_chunk) in
+    {40}new fp_1: bitstring;
+    {41}new n_1: bitstring;
+    {42}out(c, (n_1,aead(ksend_1,n_1,conf_receiver,fp_1)));
+    {43}in(c, (n2_1: bitstring,ct2_1: bitstring));
+    {44}let fp2_1: bitstring = aead_open(krecv_1,n2_1,conf_sender,ct2_1) in
+    {45}event ReceiverConfirmed(k_1);
+    {46}in(c, mode_1: bitstring);
+    {47}in(c, f_off: bitstring);
+    {48}let FileOffer(name: bitstring,sz: bitstring) = aead_open(krecv_1,seq0,frame_ad,f_off) in
+    {49}out(c, aead(ksend_1,seq0,frame_ad,FileAccept));
+    {50}if (sz = zero) then
+    {51}in(c, f_cmp: bitstring);
+    {52}let FileComplete(=f0,h: bitstring) = aead_open(krecv_1,seq1,frame_ad,f_cmp) in
+    {53}if (h = sha(empty)) then
+    {54}event ReceiverStored(k_1,name,empty,mode_1);
+    {55}out(c, aead(ksend_1,seq1,frame_ad,FileVerified(f0)));
+    {56}in(c, f_end: bitstring);
+    {57}if (aead_open(krecv_1,seq2,frame_ad,f_end) = TransferComplete) then
+        {58}event ReceiverDone(k_1,name,empty,mode_1)
+    else
+        {59}in(c, f_chk: bitstring);
+        {60}let FileChunk(=f0,=c0,ct: bitstring,nonce: bitstring) = aead_open(krecv_1,seq1,frame_ad,f_chk) in
+        {61}if (nonce = chunk_nonce(f0,c0)) then
+        {62}let data: bitstring = aead_open(kchunk_1,nonce,chunk_aad(f0,c0),ct) in
+        {63}if (sz = size(data)) then
+        {64}in(c, f_cmp_1: bitstring);
+        {65}let FileComplete(=f0,h_1: bitstring) = aead_open(krecv_1,seq2,frame_ad,f_cmp_1) in
+        {66}if (h_1 = sha(data)) then
+        {67}event ReceiverStored(k_1,name,data,mode_1);
+        {68}out(c, aead(ksend_1,seq1,frame_ad,FileVerified(f0)));
+        {69}in(c, f_end_1: bitstring);
+        {70}if (aead_open(krecv_1,seq3,frame_ad,f_end_1) = TransferComplete) then
+        {71}event ReceiverDone(k_1,name,data,mode_1)
+) | (
+    {72}phase 1;
+    {73}out(c, pw)
+)
+
+--  Process 1 (that is, process 0, with let moved downwards):
+(
+    {1}!
+    {3}new x: exponent;
+    {2}let pw_1: bitstring = pw in
+    {4}let X: bitstring = blind(pw_1,exp(g,x)) in
+    {5}out(c, X);
+    {6}in(c, Y: bitstring);
+    {7}let k: key = spake_key(pw_1,msgs(X,Y),exp(unblind(pw_1,Y),x)) in
+    {8}event SenderKey(k);
+    {12}new fp: bitstring;
+    {13}new n: bitstring;
+    {9}let ksend: key = hk(k,lbl_s2r) in
+    {14}out(c, (n,aead(ksend,n,conf_sender,fp)));
+    {15}in(c, (n2: bitstring,ct2: bitstring));
+    {10}let krecv: key = hk(k,lbl_r2s) in
+    {16}let fp2: bitstring = aead_open(krecv,n2,conf_receiver,ct2) in
+    {17}event SenderConfirmed(k);
+    {18}in(c, mode: bitstring);
+    {19}event SenderOffered(k,file_name,file_content);
+    {20}out(c, aead(ksend,seq0,frame_ad,FileOffer(file_name,size(file_content))));
+    {21}in(c, f_acc: bitstring);
+    {22}if (aead_open(krecv,seq0,frame_ad,f_acc) = FileAccept) then
+    {11}let kchunk: key = hk(k,lbl_chunk) in
+    {23}out(c, aead(ksend,seq1,frame_ad,FileChunk(f0,c0,aead(kchunk,chunk_nonce(f0,c0),chunk_aad(f0,c0),file_content),chunk_nonce(f0,c0))));
+    {24}out(c, aead(ksend,seq2,frame_ad,FileComplete(f0,sha(file_content))));
+    {25}in(c, f_ver: bitstring);
+    {26}if (aead_open(krecv,seq1,frame_ad,f_ver) = FileVerified(f0)) then
+    {27}event SenderDelivered(k,file_name,file_content);
+    {28}out(c, aead(ksend,seq3,frame_ad,TransferComplete))
+) | (
+    {29}!
+    {31}new y: exponent;
+    {30}let pw_2: bitstring = pw in
+    {32}let Y_1: bitstring = blind(pw_2,exp(g,y)) in
+    {33}out(c, Y_1);
+    {34}in(c, X_1: bitstring);
+    {35}let k_1: key = spake_key(pw_2,msgs(X_1,Y_1),exp(unblind(pw_2,X_1),y)) in
+    {36}event ReceiverKey(k_1);
+    {40}new fp_1: bitstring;
+    {41}new n_1: bitstring;
+    {37}let ksend_1: key = hk(k_1,lbl_r2s) in
+    {42}out(c, (n_1,aead(ksend_1,n_1,conf_receiver,fp_1)));
+    {43}in(c, (n2_1: bitstring,ct2_1: bitstring));
+    {38}let krecv_1: key = hk(k_1,lbl_s2r) in
+    {44}let fp2_1: bitstring = aead_open(krecv_1,n2_1,conf_sender,ct2_1) in
+    {45}event ReceiverConfirmed(k_1);
+    {46}in(c, mode_1: bitstring);
+    {47}in(c, f_off: bitstring);
+    {48}let FileOffer(name: bitstring,sz: bitstring) = aead_open(krecv_1,seq0,frame_ad,f_off) in
+    {49}out(c, aead(ksend_1,seq0,frame_ad,FileAccept));
+    {50}if (sz = zero) then
+    {51}in(c, f_cmp: bitstring);
+    {52}let FileComplete(=f0,h: bitstring) = aead_open(krecv_1,seq1,frame_ad,f_cmp) in
+    {53}if (h = sha(empty)) then
+    {54}event ReceiverStored(k_1,name,empty,mode_1);
+    {55}out(c, aead(ksend_1,seq1,frame_ad,FileVerified(f0)));
+    {56}in(c, f_end: bitstring);
+    {57}if (aead_open(krecv_1,seq2,frame_ad,f_end) = TransferComplete) then
+        {58}event ReceiverDone(k_1,name,empty,mode_1)
+    else
+        {59}in(c, f_chk: bitstring);
+        {60}let FileChunk(=f0,=c0,ct: bitstring,nonce: bitstring) = aead_open(krecv_1,seq1,frame_ad,f_chk) in
+        {61}if (nonce = chunk_nonce(f0,c0)) then
+        {39}let kchunk_1: key = hk(k_1,lbl_chunk) in
+        {62}let data: bitstring = aead_open(kchunk_1,nonce,chunk_aad(f0,c0),ct) in
+        {63}if (sz = size(data)) then
+        {64}in(c, f_cmp_1: bitstring);
+        {65}let FileComplete(=f0,h_1: bitstring) = aead_open(krecv_1,seq2,frame_ad,f_cmp_1) in
+        {66}if (h_1 = sha(data)) then
+        {67}event ReceiverStored(k_1,name,data,mode_1);
+        {68}out(c, aead(ksend_1,seq1,frame_ad,FileVerified(f0)));
+        {69}in(c, f_end_1: bitstring);
+        {70}if (aead_open(krecv_1,seq3,frame_ad,f_end_1) = TransferComplete) then
+        {71}event ReceiverDone(k_1,name,data,mode_1)
+) | (
+    {72}phase 1;
+    {73}out(c, pw)
+)
+
+-- Query not attacker_p1(file_content[]) in process 1.
+Translating the process into Horn clauses...
+Completing...
+200 rules inserted. Base: 195 rules (99 with conclusion selected). Queue: 73 rules.
+400 rules inserted. Base: 354 rules (116 with conclusion selected). Queue: 101 rules.
+600 rules inserted. Base: 497 rules (118 with conclusion selected). Queue: 90 rules.
+800 rules inserted. Base: 587 rules (122 with conclusion selected). Queue: 105 rules.
+1000 rules inserted. Base: 696 rules (122 with conclusion selected). Queue: 81 rules.
+1200 rules inserted. Base: 755 rules (126 with conclusion selected). Queue: 36 rules.
+1400 rules inserted. Base: 854 rules (134 with conclusion selected). Queue: 30 rules.
+Starting query not attacker_p1(file_content[])
+RESULT not attacker_p1(file_content[]) is true.
+
+--------------------------------------------------------------
+Verification summary:
+
+Query not attacker_p1(file_content[]) is true.
+
+--------------------------------------------------------------
+
