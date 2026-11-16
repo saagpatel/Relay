@@ -70,6 +70,9 @@ pub struct SignalingClient {
     role: Option<Role>,
 }
 
+/// How long to wait for the signaling handshake, and for a sender's nameplate.
+pub const ALLOCATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Associated data for a key-confirmation message sent by `role`.
 fn confirmation_aad(role: Role) -> Vec<u8> {
     let mut aad = b"relay/3.0.0 confirm ".to_vec();
@@ -103,9 +106,13 @@ impl SignalingClient {
         let config = WebSocketConfig::default()
             .max_message_size(Some(limit))
             .max_frame_size(Some(limit));
-        let (ws, _response) = connect_async_with_config(&url, Some(config), false)
-            .await
-            .map_err(|e| AppError::WebSocket(format!("failed to connect: {e}")))?;
+        let (ws, _response) = tokio::time::timeout(
+            ALLOCATION_TIMEOUT,
+            connect_async_with_config(&url, Some(config), false),
+        )
+        .await
+        .map_err(|_| AppError::WebSocket("timed out connecting to the signaling server".into()))?
+        .map_err(|e| AppError::WebSocket(format!("failed to connect: {e}")))?;
 
         info!("signaling: connected");
         Ok(Self { ws, role: None })
@@ -148,7 +155,20 @@ impl SignalingClient {
 
     /// After `allocate` and `register("sender", ..)`: the nameplate the server
     /// allocated for this transfer.
+    /// Gives up after `ALLOCATION_TIMEOUT` so a silent server cannot hang the
+    /// sender's start.
     pub async fn wait_for_allocation(&mut self) -> AppResult<u32> {
+        tokio::time::timeout(ALLOCATION_TIMEOUT, self.read_allocation())
+            .await
+            .map_err(|_| {
+                AppError::WebSocket(format!(
+                    "signaling server did not allocate a nameplate within {}s",
+                    ALLOCATION_TIMEOUT.as_secs()
+                ))
+            })?
+    }
+
+    async fn read_allocation(&mut self) -> AppResult<u32> {
         loop {
             let msg = self.recv_json().await?;
             match msg.msg_type.as_str() {

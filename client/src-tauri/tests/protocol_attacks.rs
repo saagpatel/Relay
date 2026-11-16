@@ -320,3 +320,27 @@ async fn signaling_server_never_sees_the_password_words() {
         );
     }
 }
+
+/// Review finding on the nameplate split: a server that never answers the
+/// allocation request must not hang the sender's start forever.
+#[tokio::test]
+async fn allocation_wait_is_bounded() {
+    let (url, handle) = attacker_endpoint().await;
+    let silent = tokio::spawn(async move {
+        let mut ws = handle.await.unwrap();
+        // Read and ignore everything; never send "allocated".
+        while let Some(Ok(_)) = ws.next().await {}
+    });
+
+    let mut client = SignalingClient::allocate(&url).await.unwrap();
+    client.register("sender", None).await.unwrap();
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        client.wait_for_allocation(),
+    )
+    .await;
+    silent.abort();
+
+    let inner = outcome.expect("wait_for_allocation hung past 15 s");
+    assert!(inner.is_err(), "a silent server produced a nameplate");
+}
