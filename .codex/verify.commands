@@ -26,8 +26,9 @@ go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
 cargo install cargo-audit --locked
 # RUSTSEC-2026-0441: pin-utils unmaintained (no fixed release); transitive via tauri -> reqwest -> hyper
 (cd client/src-tauri && cargo audit --deny warnings --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 --ignore RUSTSEC-2026-0441)
-# GHSA-ph9p-34f9-6g65: tmp path-traversal in @lhci/cli dev-dep; no production code path
-(cd client && pnpm audit --audit-level high --ignore GHSA-ph9p-34f9-6g65)
+# Ignored advisories live in client/pnpm-workspace.yaml (auditConfig.ignoreGhsas); passing
+# --ignore here would make pnpm rewrite that file on every run.
+(cd client && pnpm audit --audit-level high)
 node scripts/ci/check-release-evidence.mjs --gate g3
 node scripts/ci/check-release-materials.mjs
 

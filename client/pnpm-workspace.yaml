@@ -1,5 +1,9 @@
 allowBuilds:
   esbuild: false
+auditConfig:
+  ignoreGhsas:
+    # tmp path-traversal in the @lhci/cli dev-dep; no production code path.
+    - GHSA-ph9p-34f9-6g65
 ignoredBuiltDependencies:
   - esbuild
 overrides:
