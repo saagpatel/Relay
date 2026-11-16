@@ -6,3 +6,6 @@ export interface StartGuard {
 }
 
 export function createStartGuard(): StartGuard;
+
+/** A guard invalidated automatically when the owning component is disposed. */
+export function useStartGuard(): StartGuard;

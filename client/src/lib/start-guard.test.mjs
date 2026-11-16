@@ -32,3 +32,20 @@ test("ending a stale token does not release a newer start", () => {
   guard.end(fresh);
   assert.notEqual(guard.begin(), null);
 });
+
+// Review round 2 on #114: Escape or opening Settings unmounts SendView while
+// a start is in flight. The disposed component's start must become stale so
+// its late result is discarded (and its session cancelled), not applied.
+// Run with `node --conditions=browser` so solid-js loads its reactive build.
+test("disposing the owning component makes its in-flight start stale", async () => {
+  const { createRoot } = await import("solid-js");
+  const { useStartGuard } = await import("./start-guard.mjs");
+  let guard;
+  let token;
+  createRoot((dispose) => {
+    guard = useStartGuard();
+    token = guard.begin();
+    dispose();
+  });
+  assert.equal(guard.isCurrent(token), false, "start survived its component");
+});

@@ -1,3 +1,5 @@
+import { onCleanup } from "solid-js";
+
 // Guards the sender's start against duplicate clicks and stale results.
 // start_send now talks to the signaling server before it returns (nameplate
 // allocation), so a start can still be in flight when the user presses Back
@@ -27,4 +29,16 @@ export function createStartGuard() {
       inFlight = null;
     },
   };
+}
+
+/**
+ * A start guard owned by the calling component: when the component is
+ * disposed (Escape, opening Settings, leaving the view), any start still in
+ * flight becomes stale, so its late result is discarded instead of
+ * overwriting the shared transfer state.
+ */
+export function useStartGuard() {
+  const guard = createStartGuard();
+  onCleanup(() => guard.invalidate());
+  return guard;
 }

@@ -4,14 +4,15 @@ import { transfer, setTransfer, resetTransfer } from "../stores/transfer";
 import { settings } from "../stores/settings";
 import { startSend } from "../lib/tauri-bridge";
 import { cancelTransfer } from "../lib/tauri-bridge";
-import { createStartGuard } from "../lib/start-guard.mjs";
+import { useStartGuard } from "../lib/start-guard.mjs";
 import CodeDisplay from "./CodeDisplay";
 import FileList from "./FileList";
 
 export default function SendView() {
   // start_send allocates a nameplate before it returns, so a start can be in
   // flight when the user clicks again or goes Back.
-  const guard = createStartGuard();
+  // Invalidated on unmount too, so Escape or Settings mid-start is safe.
+  const guard = useStartGuard();
   const [starting, setStarting] = createSignal(false);
 
   async function selectFiles() {
