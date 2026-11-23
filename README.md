@@ -1,15 +1,16 @@
 # Relay
 
-Relay is a desktop file transfer app. It tries a direct QUIC connection first and uses a WebSocket relay when direct connectivity is unavailable. File contents and transfer metadata are encrypted and authenticated end to end; the signaling server sees peer addresses, the code's room number, timing and frame sizes, but never the code's words.
+Relay is a desktop file transfer app. It tries a direct QUIC connection first and uses a WebSocket relay when direct connectivity is unavailable. File contents, names, sizes and relative paths are encrypted and authenticated end to end. The signaling server sees peer addresses, the code's room number, and the timing and sizes of messages it handles.
 
 ## Quick Start
 
 ### Prerequisites
 
-- Rust toolchain with rustfmt and Clippy
-- Node.js and pnpm versions pinned by the repository
+- Rust toolchain pinned in `rust-toolchain.toml`, with rustfmt and Clippy
+- Node.js version in `.node-version` and pnpm version in `client/package.json`
 - Go version pinned by `server/go.mod`
 - Tauri desktop prerequisites for your platform
+- Make and a POSIX shell for `make check`
 
 ### Install and check
 
@@ -21,17 +22,19 @@ make check
 
 ### Run the client
 
+Start the local signaling server with `cd server && go run .` in a separate terminal at the repository root. The client defaults to `ws://localhost:8080`. For transfers between computers, configure both clients in Settings to use a signaling server they can both reach.
+
+Start the client from the repository root.
+
 ```bash
 cd client
 pnpm tauri dev
 ```
 
-The client uses `ws://localhost:8080` as its default signaling URL. Run a local server with `cd server && go run .`, or set another signaling URL in Settings.
-
 ## How It Works
 
 1. The sender asks the signaling server for a room number (the nameplate) and picks two words locally, forming a code like `4-guitar-tiger`.
-2. The receiver enters the code; only the nameplate `4` is sent to the server.
+2. The receiver enters the code. The client joins room `4` without sending the two words to the server.
 3. The peers use the whole code as the SPAKE2 password to derive a shared key.
 4. They try direct QUIC first and use the signaling server's WebSocket relay if needed.
 5. The receiver verifies each completed file using SHA-256.
@@ -50,7 +53,7 @@ The client uses `ws://localhost:8080` as its default signaling URL. Run a local 
 ### Known risks
 
 - Peer authentication rests on the transfer code. Each side pins the other's QUIC certificate to the fingerprint confirmed under the SPAKE2 key; there is no certificate authority.
-- The signaling server cannot read file contents or names and never learns the code's words, so it cannot impersonate a peer except by guessing the words online (1 in 65,536 per attempt, and a wrong guess fails key confirmation visibly). It observes peer IP addresses, the nameplate, timing and frame sizes.
+- Anyone who knows the code can impersonate a peer. The signaling server sees the nameplate. Guessing the two randomly chosen words online has a 1 in 65,536 chance per attempt, and a wrong guess fails key confirmation.
 - Direct QUIC, relay fallback, multi-file transfers, and destination safety need continued coverage as transport and receiver code changes.
 
 ### Next steps
